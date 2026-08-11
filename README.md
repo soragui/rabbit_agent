@@ -1,28 +1,41 @@
-# Coding Agent — from scratch
+# Rabbit Agent
 
-A coding agent built from first principles in Python, tracing the full learning path from a bare `while` loop to a multi-agent system with 29 tools. Uses the Anthropic Messages API (via the `anthropic` Python SDK) — works with Anthropic, DeepSeek, or any compatible endpoint.
+A coding agent built from first principles in Python — from a bare `while` loop to a multi-agent system with 29 tools. Uses the Anthropic Messages API, works with Anthropic, DeepSeek, or any compatible endpoint.
 
-## Quick start
+## Install
 
 ```bash
-# Prerequisites: uv (https://docs.astral.sh/uv/)
+curl -fsSL https://raw.githubusercontent.com/soragui/rabbit_agent/main/install.sh | bash
+```
 
-# Install Python 3.13
+Then edit `~/.rabbit-agent/settings.json` with your API key:
+
+```json
+{
+    "api_key": "sk-your-api-key-here",
+    "api_base_url": "https://api.anthropic.com",
+    "model": "claude-sonnet-4-6",
+    "fallback_model": null
+}
+```
+
+Run from any directory:
+
+```bash
+rabbit-agent
+```
+
+## Dev mode
+
+```bash
+git clone git@github.com:soragui/rabbit_agent.git && cd rabbit_agent
 uv python install 3.13
-
-# Clone and sync
-git clone <repo-url> && cd agent_main
 uv sync
-
-# Configure
-cp .env.example .env
-# Edit .env — fill in ANTHROPIC_API_KEY and adjust MODEL_ID / ANTHROPIC_BASE_URL
-
-# Run
+cp .env.example .env   # edit with your API key
 uv run python agent.py
 ```
 
-Type `?` at the prompt for help. Type `q` or press Ctrl+C twice to exit.
+Type `?` for help. `q` or Ctrl+C twice to exit.
 
 ## Progressive learning stages
 
@@ -34,7 +47,7 @@ Three standalone scripts trace how an agent is built, step by step:
 | `s02_tools.py` | Tool dispatch — a dict mapping tool names to lambdas, 5 tools |
 | `s03_permission.py` | 3-gate permission pipeline — deny-list → rule match → user prompt |
 
-Each script is fully self-contained (duplicates its own config and tools) so you can read them in any order.
+Each script is fully self-contained — read them in any order.
 
 ## Architecture
 
@@ -42,18 +55,19 @@ The full agent (`agent.py`) imports from two packages:
 
 ### `harness/` — core infrastructure
 
-- **Hook system** — 4 extension points: `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`. First non-None `PreToolUse` return blocks execution.
-- **Permissions** — deny-list for dangerous commands, workspace-boundary enforcement, interactive approval for risky ops.
-- **Memory** — file-backed persistent memory from `.memory/*.md` with YAML frontmatter, keyword-matched into context.
-- **Compaction** — 4-level pipeline (budget → snip → micro → reactive) to keep context within limits while preserving tool-use pair integrity.
-- **Recovery** — exponential backoff with jitter, automatic model fallback on repeated 529 errors.
-- **Background** — auto-detects slow bash commands and dispatches them to daemon threads.
-- **Tool pool** — assembles the complete `(tools, handlers)` tuple including dynamically-prefixed MCP tools.
+- **Hook system** — 4 extension points: `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`
+- **Permissions** — deny-list, workspace-boundary enforcement, interactive approval for risky ops
+- **Memory** — file-backed persistent memory from `.memory/*.md` with YAML frontmatter
+- **Compaction** — 4-level pipeline (budget → snip → micro → reactive), preserves tool-use pair integrity
+- **Recovery** — exponential backoff with jitter, automatic model fallback on repeated 529 errors
+- **Background** — auto-detects slow bash commands and dispatches to daemon threads
+- **Render** — Rich-based terminal UI with markdown rendering, syntax highlighting, spinners
+- **Tool pool** — assembles the complete `(tools, handlers)` tuple including dynamically-prefixed MCP tools
 
 ### `tools/` — tool implementations
 
-- **Filesystem** — `bash`, `read_file`, `write_file`, `edit_file`, `glob` (all workspace-bound)
-- **Subagent** — isolated agent with its own message loop, 5 file tools, max 30 turns
+- **Filesystem** — `bash`, `read_file`, `write_file`, `edit_file`, `glob`
+- **Subagent** — isolated agent with its own message loop, max 30 turns
 - **Skills** — on-demand loading of `SKILL.md` files from `skills/` directory
 - **Task system** — persistent task graph with dependency tracking in `.tasks/*.json`
 - **Cron** — 5-field cron scheduler with recurring and durable job support
@@ -64,13 +78,16 @@ The full agent (`agent.py`) imports from two packages:
 
 ## Configuration
 
-All config lives in `config.py` and `.env`:
+| Mode | Config location |
+|---|---|
+| Installed | `~/.rabbit-agent/settings.json` |
+| Dev | `.env` in the repo root |
 
-| Variable | Default | Description |
-|---|---|---|
-| `MODEL_ID` | `claude-sonnet-4-6` | Model to use |
-| `FALLBACK_MODEL_ID` | (none) | Switched to after 3 consecutive 529s |
-| `ANTHROPIC_BASE_URL` | — | API endpoint (set for DeepSeek, omit for Anthropic) |
-| `ANTHROPIC_API_KEY` | — | API key |
+| Key | Description |
+|---|---|
+| `api_key` / `ANTHROPIC_API_KEY` | API key |
+| `api_base_url` / `ANTHROPIC_BASE_URL` | API endpoint (omit for Anthropic, set for DeepSeek) |
+| `model` / `MODEL_ID` | Model ID (default: `claude-sonnet-4-6`) |
+| `fallback_model` / `FALLBACK_MODEL_ID` | Fallback after repeated 529 errors |
 
-Runtime directories (`.memory`, `.tasks`, `.mailboxes`, `.worktrees`, `.transcripts`, `.task_outputs`) are auto-created on import.
+Runtime directories (`.memory`, `.tasks`, `.mailboxes`, `.worktrees`, `.transcripts`, `.task_outputs`) live under `RABBIT_HOME` and are auto-created on import.
