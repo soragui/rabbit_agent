@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# install.sh — install rabbit-agent to ~/.rabbit-agent
+# install.sh — install 51agent to ~/.51agent
 #
 # Remote install (when published):
-#   curl -fsSL https://raw.githubusercontent.com/<user>/rabbit-agent/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/soragui/rabbit_agent/main/install.sh | bash
 #
 # Local install (from repo dir):
 #   bash install.sh
 #
 # Options:
 #   --local <path>   Install from a local repo path (skips GitHub download)
-#   --version <tag>  Install a specific release tag (default: latest)
-#   --bin-dir <dir>  Where to place the rabbit-agent wrapper (default: ~/.local/bin)
+#   --version <tag>  Install a specific release tag (default: latest, read from VERSION file)
+#   --bin-dir <dir>  Where to place the 51agent wrapper (default: ~/.local/bin)
 
 set -euo pipefail
 
-GITHUB_REPO="${GITHUB_REPO:-soragui/rabbit-agent}"
-RABBIT_HOME="${RABBIT_HOME:-$HOME/.rabbit-agent}"
+GITHUB_REPO="${GITHUB_REPO:-soragui/rabbit_agent}"
+AGENT_HOME="${AGENT_HOME:-$HOME/.51agent}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 SOURCE_DIR=""
 VERSION="${VERSION:-latest}"
@@ -41,33 +41,26 @@ trap _cleanup EXIT
 
 _download_release() {
     local dest="$1"
-    local tarball
 
-    echo "→ Fetching latest release from GitHub ..."
-
+    # First, determine the version if not explicitly set
     if [ "$VERSION" = "latest" ]; then
-        local api_url="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
-        local download_url
-        download_url=$(curl -fsSL "$api_url" 2>/dev/null \
-            | grep -o '"tarball_url": *"[^"]*"' \
-            | head -1 \
-            | sed 's/.*"tarball_url": *"\([^"]*\)".*/\1/')
-        if [ -z "$download_url" ]; then
-            echo "Error: could not find latest release for $GITHUB_REPO"
+        echo "→ Fetching latest version from GitHub ..."
+        local version_url="https://raw.githubusercontent.com/$GITHUB_REPO/main/VERSION"
+        VERSION=$(curl -fsSL "$version_url" 2>/dev/null | head -1 | tr -d '[:space:]')
+        if [ -z "$VERSION" ]; then
+            echo "Error: could not determine latest version from $GITHUB_REPO"
             echo "Try installing from a local repo: bash install.sh --local /path/to/repo"
             exit 1
         fi
-        tarball="$dest/release.tar.gz"
-        echo "  Downloading $download_url ..."
-        curl -fsSL "$download_url" -o "$tarball" || {
-            echo "Error: download failed."; exit 1; }
-    else
-        tarball="$dest/release.tar.gz"
-        local url="https://github.com/$GITHUB_REPO/archive/refs/tags/$VERSION.tar.gz"
-        echo "  Downloading $url ..."
-        curl -fsSL "$url" -o "$tarball" || {
-            echo "Error: download failed for version $VERSION"; exit 1; }
+        echo "  Latest version: $VERSION"
     fi
+
+    # Download the versioned tarball
+    local tarball="$dest/release.tar.gz"
+    local url="https://github.com/$GITHUB_REPO/archive/refs/tags/$VERSION.tar.gz"
+    echo "  Downloading $url ..."
+    curl -fsSL "$url" -o "$tarball" || {
+        echo "Error: download failed for version $VERSION"; exit 1; }
 
     echo "  Extracting ..."
     tar -xzf "$tarball" -C "$dest" --strip-components=1
@@ -79,7 +72,7 @@ _download_release() {
         ls -la "$dest"
         exit 1
     fi
-    echo "  ✓ Release extracted"
+    echo "  ✓ Release $VERSION extracted"
 }
 
 # -- determine source ------------------------------------------------------
@@ -90,16 +83,16 @@ if [ -z "$SOURCE_DIR" ]; then
         SOURCE_DIR="$SCRIPT_DIR"
     else
         # Download from GitHub to a temp directory
-        SOURCE_DIR="$(mktemp -d /tmp/rabbit-agent-XXXXXX)"
+        SOURCE_DIR="$(mktemp -d /tmp/51agent-XXXXXX)"
         CLEANUP_SOURCE="$SOURCE_DIR"
         _download_release "$SOURCE_DIR"
     fi
 fi
 
 echo "╭──────────────────────────────────────────────╮"
-echo "│         Rabbit Agent Installer                │"
+echo "│         51agent Installer                     │"
 echo "├──────────────────────────────────────────────┤"
-echo "│  Agent home : $RABBIT_HOME"
+echo "│  Agent home : $AGENT_HOME"
 echo "│  Source     : $SOURCE_DIR"
 echo "│  Bin dir    : $BIN_DIR"
 echo "│  Version    : $VERSION"
@@ -113,42 +106,42 @@ command -v uv >/dev/null 2>&1 || {
     echo "Error: uv is required but not found. Install: curl -LsSf https://astral.sh/uv/install.sh | sh"; exit 1; }
 
 # -- install agent files ---------------------------------------------------
-echo "→ Installing agent files to $RABBIT_HOME ..."
-mkdir -p "$RABBIT_HOME"
+echo "→ Installing agent files to $AGENT_HOME ..."
+mkdir -p "$AGENT_HOME"
 
 # Core modules
-FILES=(agent.py config.py loop.py)
+FILES=(agent.py config.py loop.py VERSION)
 for f in "${FILES[@]}"; do
-    cp "$SOURCE_DIR/$f" "$RABBIT_HOME/"
+    cp "$SOURCE_DIR/$f" "$AGENT_HOME/"
 done
 
 # Packages
 for pkg in harness tools; do
-    mkdir -p "$RABBIT_HOME/$pkg"
-    cp "$SOURCE_DIR/$pkg"/*.py "$RABBIT_HOME/$pkg/"
+    mkdir -p "$AGENT_HOME/$pkg"
+    cp "$SOURCE_DIR/$pkg"/*.py "$AGENT_HOME/$pkg/"
 done
 
 # Optional: skills directory
 if [ -d "$SOURCE_DIR/skills" ]; then
-    cp -r "$SOURCE_DIR/skills" "$RABBIT_HOME/"
+    cp -r "$SOURCE_DIR/skills" "$AGENT_HOME/"
 else
-    mkdir -p "$RABBIT_HOME/skills"
+    mkdir -p "$AGENT_HOME/skills"
 fi
 
 echo "  ✓ Files installed"
 
 # -- venv & dependencies ---------------------------------------------------
 echo "→ Setting up virtual environment ..."
-if [ ! -f "$RABBIT_HOME/pyproject.toml" ]; then
-    cp "$SOURCE_DIR/pyproject.toml" "$RABBIT_HOME/"
+if [ ! -f "$AGENT_HOME/pyproject.toml" ]; then
+    cp "$SOURCE_DIR/pyproject.toml" "$AGENT_HOME/"
 fi
 # Suppress uv output unless there's an error
-(cd "$RABBIT_HOME" && uv sync 2>&1) | tail -3
+(cd "$AGENT_HOME" && uv sync 2>&1) | tail -3
 echo "  ✓ Dependencies installed"
 
 # -- settings --------------------------------------------------------------
-if [ ! -f "$RABBIT_HOME/settings.json" ]; then
-    cat > "$RABBIT_HOME/settings.json" <<'SETTINGS'
+if [ ! -f "$AGENT_HOME/settings.json" ]; then
+    cat > "$AGENT_HOME/settings.json" <<'SETTINGS'
 {
     "api_key": "sk-your-api-key-here",
     "api_base_url": "https://api.anthropic.com",
@@ -162,19 +155,19 @@ else
 fi
 
 # -- wrapper script --------------------------------------------------------
-echo "→ Installing rabbit-agent command ..."
+echo "→ Installing 51agent command ..."
 mkdir -p "$BIN_DIR"
 
-WRAPPER="$BIN_DIR/rabbit-agent"
+WRAPPER="$BIN_DIR/51agent"
 cat > "$WRAPPER" <<'WRAPPER'
 #!/usr/bin/env bash
-# rabbit-agent — global launcher for the Rabbit coding agent.
-export RABBIT_HOME="${RABBIT_HOME:-$HOME/.rabbit-agent}"
-if [ ! -d "$RABBIT_HOME" ]; then
-    echo "rabbit-agent: not found at $RABBIT_HOME" >&2
+# 51agent — global launcher for the 51 coding agent.
+export AGENT_HOME="${AGENT_HOME:-$HOME/.51agent}"
+if [ ! -d "$AGENT_HOME" ]; then
+    echo "51agent: not found at $AGENT_HOME" >&2
     exit 1
 fi
-exec "$RABBIT_HOME/.venv/bin/python" -u "$RABBIT_HOME/agent.py" "$@"
+exec "$AGENT_HOME/.venv/bin/python" -u "$AGENT_HOME/agent.py" "$@"
 WRAPPER
 
 chmod +x "$WRAPPER"
@@ -192,11 +185,11 @@ fi
 # -- done ------------------------------------------------------------------
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Rabbit Agent installed!"
+echo "  51agent installed!"
 echo ""
-echo "  1. Edit settings:    $RABBIT_HOME/settings.json"
-echo "  2. Run anywhere:     rabbit-agent"
+echo "  1. Edit settings:    $AGENT_HOME/settings.json"
+echo "  2. Run anywhere:     51agent"
 echo ""
 echo "  Or run directly from its home:"
-echo "    cd $RABBIT_HOME && uv run python agent.py"
+echo "    cd $AGENT_HOME && uv run python agent.py"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

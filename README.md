@@ -1,4 +1,4 @@
-# Rabbit Agent
+# 51agent
 
 A coding agent built from first principles in Python — from a bare `while` loop to a multi-agent system with 29 tools. Uses the Anthropic Messages API, works with Anthropic, DeepSeek, or any compatible endpoint.
 
@@ -8,7 +8,7 @@ A coding agent built from first principles in Python — from a bare `while` loo
 curl -fsSL https://raw.githubusercontent.com/soragui/rabbit_agent/main/install.sh | bash
 ```
 
-Then edit `~/.rabbit-agent/settings.json` with your API key:
+Then edit `~/.51agent/settings.json` with your API key:
 
 ```json
 {
@@ -22,7 +22,7 @@ Then edit `~/.rabbit-agent/settings.json` with your API key:
 Run from any directory:
 
 ```bash
-rabbit-agent
+51agent
 ```
 
 ## Dev mode
@@ -80,7 +80,7 @@ The full agent (`agent.py`) imports from two packages:
 
 | Mode | Config location |
 |---|---|
-| Installed | `~/.rabbit-agent/settings.json` |
+| Installed | `~/.51agent/settings.json` |
 | Dev | `.env` in the repo root |
 
 | Key | Description |
@@ -90,4 +90,4 @@ The full agent (`agent.py`) imports from two packages:
 | `model` / `MODEL_ID` | Model ID (default: `claude-sonnet-4-6`) |
 | `fallback_model` / `FALLBACK_MODEL_ID` | Fallback after repeated 529 errors |
 
-Runtime directories (`.memory`, `.tasks`, `.mailboxes`, `.worktrees`, `.transcripts`, `.task_outputs`) live under `RABBIT_HOME` and are auto-created on import.
+Runtime directories (`.memory`, `.tasks`, `.mailboxes`, `.worktrees`, `.transcripts`, `.task_outputs`) live under `AGENT_HOME` and are auto-created on import.

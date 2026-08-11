@@ -18,10 +18,10 @@ uv sync
 # Run the full agent (interactive CLI) — dev mode
 uv run python agent.py
 
-# Install system-wide (to ~/.rabbit-agent)
+# Install system-wide (to ~/.51agent)
 bash install.sh
 # Then run from any directory:
-rabbit-agent
+51agent
 
 # Run progressive learning stages individually
 uv run python s01_loop.py     # bare agent loop + bash tool
@@ -93,10 +93,10 @@ The main agent is `agent.py`, which imports from two packages:
 ### Configuration (`config.py`)
 
 Two modes:
-- **Installed**: loads from `$RABBIT_HOME/settings.json` (`~/.rabbit-agent/settings.json`)
+- **Installed**: loads from `$AGENT_HOME/settings.json` (`~/.51agent/settings.json`)
 - **Dev**: loads from `.env` in the current directory (via `python-dotenv`)
 
-`RABBIT_HOME` is the agent's own directory (runtime data, skills, settings). `WORKDIR` is always `cwd()` — the directory the user invoked the agent from. All file tools are bound to `WORKDIR`; runtime directories live under `RABBIT_HOME`.
+`AGENT_HOME` is the agent's own directory (runtime data, skills, settings). `WORKDIR` is always `cwd()` — the directory the user invoked the agent from. All file tools are bound to `WORKDIR`; runtime directories live under `AGENT_HOME`.
 
 ### Key design patterns
 
