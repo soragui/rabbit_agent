@@ -4,7 +4,6 @@ from dataclasses import dataclass, asdict
 from datetime import datetime
 
 from config import WORKDIR, CRON_JOBS_FILE
-from harness.render import render_info
 
 
 @dataclass
@@ -146,7 +145,7 @@ def scheduler_loop():
                         if _last_fired.get(job.id) != minute_marker:
                             cron_queue.append(job)
                             _last_fired[job.id] = minute_marker
-                            render_info(f"Cron fired: {job.id} — {job.prompt[:50]}")
+                            print(f"\n  [cron] Fired: {job.id} — {job.prompt[:50]}")
                         if not job.recurring:
                             scheduled_jobs.pop(job.id, None)
                             if job.durable:

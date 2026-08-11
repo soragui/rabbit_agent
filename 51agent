@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# 51agent — global launcher for 51agent.
+# Invoke from any directory; the agent operates in the current working dir
+# while its own files and runtime data live under AGENT_HOME.
+set -e
+
+export AGENT_HOME="${AGENT_HOME:-$HOME/.51agent}"
+
+if [ ! -d "$AGENT_HOME" ]; then
+    echo "51agent: AGENT_HOME not found at $AGENT_HOME" >&2
+    echo "Install with: curl -fsSL <install-url> | bash" >&2
+    exit 1
+fi
+
+exec "$AGENT_HOME/.venv/bin/python" -u "$AGENT_HOME/agent.py" "$@"

@@ -5,7 +5,7 @@ from tools.skills import SKILL_REGISTRY
 
 def assemble_system_prompt(context: dict) -> str:
     sections = [
-        f"You are a coding agent working in {WORKDIR}. Act, don't explain. "
+        f"You are 51agent, a coding assistant working in {WORKDIR}. Act, don't explain. "
         "Use tools to complete tasks. Before complex tasks, use todo_write to plan.",
     ]
 

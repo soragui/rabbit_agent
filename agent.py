@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-agent.py — Rabbit Coding Agent.
+agent.py — 51agent.
 
 Usage:
-    rabbit-agent            # if installed globally
-    uv run python agent.py  # from the repo (dev mode)
+    51agent                  # if installed globally
+    uv run python agent.py   # from the repo (dev mode)
 
 Config:
-    Installed: ~/.rabbit-agent/settings.json
+    Installed: ~/.51agent/settings.json
     Dev mode:  .env in the current directory
 """
 import sys, time, threading, os
@@ -22,7 +22,6 @@ try:
 except ImportError:
     pass
 
-# -- ensure we can import from agent_main ---------------------------------
 _script_dir = Path(__file__).resolve().parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
@@ -36,9 +35,7 @@ from harness import trigger_hooks
 from harness.permissions import install as install_permissions
 from harness.memory import inject_memories
 from harness.tool_pool import assemble_tool_pool
-from harness.render import (render_markdown, render_banner, render_help,
-                              render_inbox, render_error, render_info, prompt)
-from loop import agent_loop_full
+from harness.render import render_banner, render_help, render_markdown, render_inbox, render_error, render_info, render_tool_use, spinner, use_color, prompt as _prompt
 
 install_permissions()
 
@@ -81,75 +78,39 @@ def queue_processor_loop():
             agent_lock.release()
 
 
-# -- banner / help ---------------------------------------------------------
-# (moved to harness/render.py — kept here as thin wrappers)
-def print_banner():
+# -- main ------------------------------------------------------------------
+if __name__ == "__main__":
+    from loop import agent_loop_full
+
     render_banner(MODEL, str(WORKDIR))
-
-
-# -- prompt ---------------------------------------------------------------
-def _prompt(text: str) -> str:
-    return prompt(text)
-
-
-# -- double Ctrl+C safety --------------------------------------------------
-_last_interrupt = 0.0
-_INTERRUPT_WINDOW = 2.0  # seconds
-
-
-def _handle_interrupt() -> bool:
-    """Return True if the agent should exit (two Ctrl+C within window)."""
-    global _last_interrupt
-    now = time.time()
-    if now - _last_interrupt < _INTERRUPT_WINDOW:
-        return True
-    _last_interrupt = now
-    print(f"\n  ⚠ Press Ctrl+C again within {_INTERRUPT_WINDOW:.0f}s to exit (or type 'q')")
-    return False
-
-
-def print_help():
     render_help()
 
-
-# -- main ------------------------------------------------------------------
-def main():
-    print_banner()
-    print_help()
-
     import atexit
-    atexit.register(lambda: print("\nAgent shut down. Goodbye!"))
+    atexit.register(lambda: print("\n51agent shut down. Goodbye!"))
 
     history: list = []
     _history_ref = history
 
-    # start background threads
     threading.Thread(target=_cron.scheduler_loop, daemon=True, name="cron").start()
     threading.Thread(target=queue_processor_loop, daemon=True, name="cron-queue").start()
 
     while True:
         try:
-            query = _prompt("agent >> ")
-        except EOFError:
+            query = _prompt("51agent >> ")
+        except (EOFError, KeyboardInterrupt):
             print("\nBye.")
             break
-        except KeyboardInterrupt:
-            print()
-            if _handle_interrupt():
-                print("Bye.")
-                break
-            continue
 
         if query.strip().lower() in ("q", "exit", "quit"):
             break
         if query.strip().lower() == "?":
-            print_help()
+            render_help()
             continue
 
-        # empty line: check inbox
         if not query.strip():
             inbox = _teams.consume_lead_inbox()
             if inbox:
+                render_inbox(inbox)
                 inbox_text = "\n".join(
                     f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
                     for m in inbox)
@@ -172,13 +133,12 @@ def main():
         _agent_idle = False
         trigger_hooks("UserPromptSubmit", query)
 
-        # cron
         for job in _cron.consume_queue():
             history.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
 
-        # inbox
         inbox = _teams.consume_lead_inbox()
         if inbox:
+            render_inbox(inbox)
             inbox_text = "\n".join(
                 f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
                 for m in inbox)
@@ -186,18 +146,15 @@ def main():
 
         history.append({"role": "user", "content": query})
 
-        ctx = {
-            "workspace": str(WORKDIR),
-            "memories": "",
-            "mcp_servers": ", ".join(_mcp.mcp_clients.keys()),
-        }
+        ctx = {"workspace": str(WORKDIR), "memories": "",
+               "mcp_servers": ", ".join(_mcp.mcp_clients.keys())}
         ctx = inject_memories(ctx)
         tools, handlers = assemble_tool_pool()
         ctx["enabled_tools"] = [t["name"] for t in tools]
 
-        agent_loop_full(history, ctx, tools, handlers)
+        with spinner("Thinking..."):
+            agent_loop_full(history, ctx, tools, handlers)
 
-        # rebuild tool pool if MCP was connected
         for msg in history[-2:]:
             content = msg.get("content", [])
             if isinstance(content, list):
@@ -216,7 +173,3 @@ def main():
                 if getattr(block, "type", None) == "text":
                     render_markdown(block.text)
         print()
-
-
-if __name__ == "__main__":
-    main()

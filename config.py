@@ -1,4 +1,4 @@
-"""Configuration, constants, and shared state for the coding agent."""
+"""Configuration, constants, and shared state for 51agent."""
 import json
 import os
 import re
@@ -7,16 +7,16 @@ from pathlib import Path
 from anthropic import Anthropic
 
 # -- agent home vs workdir --------------------------------------------------
-# RABBIT_HOME: where agent files, settings, and runtime data live
+# AGENT_HOME: where agent files, settings, and runtime data live
 # WORKDIR: where the agent operates (the user's current directory)
-RABBIT_HOME = Path(os.environ.get("RABBIT_HOME", Path.cwd()))
+AGENT_HOME = Path(os.environ.get("AGENT_HOME", Path.cwd()))
 WORKDIR = Path.cwd()
 
 
 # -- settings ---------------------------------------------------------------
 def _load_settings() -> dict:
-    """Load settings from RABBIT_HOME/settings.json, falling back to .env."""
-    settings_path = RABBIT_HOME / "settings.json"
+    """Load settings from AGENT_HOME/settings.json, falling back to .env."""
+    settings_path = AGENT_HOME / "settings.json"
     if settings_path.exists():
         with open(settings_path) as f:
             return json.load(f)
@@ -47,14 +47,14 @@ MODEL = _settings.get("model") or os.environ.get("MODEL_ID", "claude-sonnet-4-6"
 FALLBACK_MODEL = _settings.get("fallback_model") or os.environ.get("FALLBACK_MODEL_ID") or None
 
 # -- directories -----------------------------------------------------------
-SKILLS_DIR = RABBIT_HOME / "skills"
-MEMORY_DIR = RABBIT_HOME / ".memory"
-TASKS_DIR = RABBIT_HOME / ".tasks"
-MAILBOX_DIR = RABBIT_HOME / ".mailboxes"
-WORKTREES_DIR = RABBIT_HOME / ".worktrees"
-TRANSCRIPT_DIR = RABBIT_HOME / ".transcripts"
-TOOL_RESULTS_DIR = RABBIT_HOME / ".task_outputs" / "tool-results"
-CRON_JOBS_FILE = RABBIT_HOME / ".scheduled_tasks.json"
+SKILLS_DIR = AGENT_HOME / "skills"
+MEMORY_DIR = AGENT_HOME / ".memory"
+TASKS_DIR = AGENT_HOME / ".tasks"
+MAILBOX_DIR = AGENT_HOME / ".mailboxes"
+WORKTREES_DIR = AGENT_HOME / ".worktrees"
+TRANSCRIPT_DIR = AGENT_HOME / ".transcripts"
+TOOL_RESULTS_DIR = AGENT_HOME / ".task_outputs" / "tool-results"
+CRON_JOBS_FILE = AGENT_HOME / ".scheduled_tasks.json"
 
 for d in [MEMORY_DIR, TASKS_DIR, MAILBOX_DIR, WORKTREES_DIR,
           TRANSCRIPT_DIR, TOOL_RESULTS_DIR]:
