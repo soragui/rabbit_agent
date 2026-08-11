@@ -1,0 +1,11 @@
+[project]
+name = "agent-main"
+version = "0.1.0"
+description = "From-scratch coding agent — progressive learning from bare loop to full multi-agent system"
+requires-python = ">=3.13"
+dependencies = [
+    "anthropic>=0.121.0",
+    "python-dotenv>=1.2.2",
+    "pyyaml>=6.0.3",
+    "rich>=15.0.0",
+]
