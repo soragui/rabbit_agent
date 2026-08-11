@@ -2,29 +2,85 @@
 # install.sh — install rabbit-agent to ~/.rabbit-agent
 #
 # Remote install (when published):
-#   curl -fsSL https://<release-url>/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/<user>/rabbit-agent/main/install.sh | bash
 #
 # Local install (from repo dir):
 #   bash install.sh
 #
 # Options:
-#   --local <path>   Install from a local repo path
+#   --local <path>   Install from a local repo path (skips GitHub download)
+#   --version <tag>  Install a specific release tag (default: latest)
 #   --bin-dir <dir>  Where to place the rabbit-agent wrapper (default: ~/.local/bin)
 
 set -euo pipefail
 
+GITHUB_REPO="${GITHUB_REPO:-soragui/rabbit-agent}"
 RABBIT_HOME="${RABBIT_HOME:-$HOME/.rabbit-agent}"
 BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 SOURCE_DIR=""
+VERSION="${VERSION:-latest}"
+CLEANUP_SOURCE=""
 
 # -- parse args ------------------------------------------------------------
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --local) SOURCE_DIR="$2"; shift 2 ;;
+        --version) VERSION="$2"; shift 2 ;;
         --bin-dir) BIN_DIR="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# -- helpers ---------------------------------------------------------------
+_cleanup() {
+    if [ -n "$CLEANUP_SOURCE" ] && [ -d "$CLEANUP_SOURCE" ]; then
+        rm -rf "$CLEANUP_SOURCE"
+    fi
+}
+trap _cleanup EXIT
+
+_download_release() {
+    local dest="$1"
+    local tarball
+
+    echo "→ Fetching latest release from GitHub ..."
+
+    if [ "$VERSION" = "latest" ]; then
+        local api_url="https://api.github.com/repos/$GITHUB_REPO/releases/latest"
+        local download_url
+        download_url=$(curl -fsSL "$api_url" 2>/dev/null \
+            | grep -o '"tarball_url": *"[^"]*"' \
+            | head -1 \
+            | sed 's/.*"tarball_url": *"\([^"]*\)".*/\1/')
+        if [ -z "$download_url" ]; then
+            echo "Error: could not find latest release for $GITHUB_REPO"
+            echo "Try installing from a local repo: bash install.sh --local /path/to/repo"
+            exit 1
+        fi
+        tarball="$dest/release.tar.gz"
+        echo "  Downloading $download_url ..."
+        curl -fsSL "$download_url" -o "$tarball" || {
+            echo "Error: download failed."; exit 1; }
+    else
+        tarball="$dest/release.tar.gz"
+        local url="https://github.com/$GITHUB_REPO/archive/refs/tags/$VERSION.tar.gz"
+        echo "  Downloading $url ..."
+        curl -fsSL "$url" -o "$tarball" || {
+            echo "Error: download failed for version $VERSION"; exit 1; }
+    fi
+
+    echo "  Extracting ..."
+    tar -xzf "$tarball" -C "$dest" --strip-components=1
+    rm -f "$tarball"
+
+    # Verify extract
+    if [ ! -f "$dest/agent.py" ]; then
+        echo "Error: extracted tarball missing agent.py. Contents:"
+        ls -la "$dest"
+        exit 1
+    fi
+    echo "  ✓ Release extracted"
+}
 
 # -- determine source ------------------------------------------------------
 if [ -z "$SOURCE_DIR" ]; then
@@ -33,10 +89,10 @@ if [ -z "$SOURCE_DIR" ]; then
     if [ -f "$SCRIPT_DIR/agent.py" ] && [ -f "$SCRIPT_DIR/config.py" ]; then
         SOURCE_DIR="$SCRIPT_DIR"
     else
-        echo "Error: cannot auto-detect source directory."
-        echo "Run from the repo:  bash install.sh"
-        echo "Or specify path:    bash install.sh --local /path/to/repo"
-        exit 1
+        # Download from GitHub to a temp directory
+        SOURCE_DIR="$(mktemp -d /tmp/rabbit-agent-XXXXXX)"
+        CLEANUP_SOURCE="$SOURCE_DIR"
+        _download_release "$SOURCE_DIR"
     fi
 fi
 
@@ -46,6 +102,7 @@ echo "├───────────────────────�
 echo "│  Agent home : $RABBIT_HOME"
 echo "│  Source     : $SOURCE_DIR"
 echo "│  Bin dir    : $BIN_DIR"
+echo "│  Version    : $VERSION"
 echo "╰──────────────────────────────────────────────╯"
 echo ""
 
@@ -60,9 +117,7 @@ echo "→ Installing agent files to $RABBIT_HOME ..."
 mkdir -p "$RABBIT_HOME"
 
 # Core modules
-FILES=(
-    agent.py config.py loop.py
-)
+FILES=(agent.py config.py loop.py)
 for f in "${FILES[@]}"; do
     cp "$SOURCE_DIR/$f" "$RABBIT_HOME/"
 done
@@ -87,7 +142,8 @@ echo "→ Setting up virtual environment ..."
 if [ ! -f "$RABBIT_HOME/pyproject.toml" ]; then
     cp "$SOURCE_DIR/pyproject.toml" "$RABBIT_HOME/"
 fi
-(cd "$RABBIT_HOME" && uv sync --quiet 2>&1 | tail -1)
+# Suppress uv output unless there's an error
+(cd "$RABBIT_HOME" && uv sync 2>&1) | tail -3
 echo "  ✓ Dependencies installed"
 
 # -- settings --------------------------------------------------------------
@@ -141,6 +197,6 @@ echo ""
 echo "  1. Edit settings:    $RABBIT_HOME/settings.json"
 echo "  2. Run anywhere:     rabbit-agent"
 echo ""
-echo "  Or run the agent directly from its home:"
+echo "  Or run directly from its home:"
 echo "    cd $RABBIT_HOME && uv run python agent.py"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
