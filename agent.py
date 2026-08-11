@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
-agent.py — 从 0 到 1 实现一个完整的 Coding Agent
+agent.py — Rabbit Coding Agent.
 
-用法:
-    pip install anthropic python-dotenv pyyaml
-    编辑 .env 填入 API key
-    python agent.py
+Usage:
+    rabbit-agent            # if installed globally
+    uv run python agent.py  # from the repo (dev mode)
+
+Config:
+    Installed: ~/.rabbit-agent/settings.json
+    Dev mode:  .env in the current directory
 """
 import sys, time, threading, os
 from pathlib import Path
@@ -110,7 +113,7 @@ def print_help():
 
 
 # -- main ------------------------------------------------------------------
-if __name__ == "__main__":
+def main():
     print_banner()
     print_help()
 
@@ -213,3 +216,7 @@ if __name__ == "__main__":
                 if getattr(block, "type", None) == "text":
                     render_markdown(block.text)
         print()
+
+
+if __name__ == "__main__":
+    main()

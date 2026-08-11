@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# rabbit-agent — global launcher for the Rabbit coding agent.
+# Invoke from any directory; the agent operates in the current working dir
+# while its own files and runtime data live under RABBIT_HOME.
+set -e
+
+export RABBIT_HOME="${RABBIT_HOME:-$HOME/.rabbit-agent}"
+
+if [ ! -d "$RABBIT_HOME" ]; then
+    echo "rabbit-agent: RABBIT_HOME not found at $RABBIT_HOME" >&2
+    echo "Install with: curl -fsSL <install-url> | bash" >&2
+    exit 1
+fi
+
+exec "$RABBIT_HOME/.venv/bin/python" -u "$RABBIT_HOME/agent.py" "$@"

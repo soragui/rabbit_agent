@@ -15,8 +15,13 @@ uv python install 3.13
 # Sync dependencies (auto-creates .venv)
 uv sync
 
-# Run the full agent (interactive CLI)
+# Run the full agent (interactive CLI) — dev mode
 uv run python agent.py
+
+# Install system-wide (to ~/.rabbit-agent)
+bash install.sh
+# Then run from any directory:
+rabbit-agent
 
 # Run progressive learning stages individually
 uv run python s01_loop.py     # bare agent loop + bash tool
@@ -84,6 +89,14 @@ The main agent is `agent.py`, which imports from two packages:
 - API: uses `ANTHROPIC_BASE_URL` pointing to `https://api.deepseek.com/anthropic`
 - All runtime directories (`.memory`, `.tasks`, `.mailboxes`, `.worktrees`, `.transcripts`, `.task_outputs/tool-results`) are auto-created on import
 - `safe_path()` enforces all file operations stay within `WORKDIR`
+
+### Configuration (`config.py`)
+
+Two modes:
+- **Installed**: loads from `$RABBIT_HOME/settings.json` (`~/.rabbit-agent/settings.json`)
+- **Dev**: loads from `.env` in the current directory (via `python-dotenv`)
+
+`RABBIT_HOME` is the agent's own directory (runtime data, skills, settings). `WORKDIR` is always `cwd()` — the directory the user invoked the agent from. All file tools are bound to `WORKDIR`; runtime directories live under `RABBIT_HOME`.
 
 ### Key design patterns
 
