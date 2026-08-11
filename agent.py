@@ -152,8 +152,12 @@ if __name__ == "__main__":
         tools, handlers = assemble_tool_pool()
         ctx["enabled_tools"] = [t["name"] for t in tools]
 
-        with spinner("Thinking..."):
-            agent_loop_full(history, ctx, tools, handlers)
+        try:
+            with spinner("Thinking..."):
+                agent_loop_full(history, ctx, tools, handlers)
+        except KeyboardInterrupt:
+            print()
+            render_info("Interrupted. Type 'q' to quit.")
 
         for msg in history[-2:]:
             content = msg.get("content", [])

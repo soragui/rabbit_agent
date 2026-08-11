@@ -27,6 +27,10 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
                         messages=safe_messages_slice(messages, 100),
                         tools=tools, max_tokens=max_tokens),
                     state)
+        except KeyboardInterrupt:
+            print()
+            render_info("Interrupted.")
+            return
         except Exception as e:
             err_str = str(e).lower()
             if "prompt_too_long" in err_str or "413" in err_str:

@@ -103,11 +103,19 @@ def render_inbox(messages: list[dict]) -> None:
 @contextmanager
 def spinner(label: str = "Thinking..."):
     if _HAS_RICH:
-        with _console.status(f"[cyan]{label}[/]", spinner="dots"):
-            yield
+        try:
+            with _console.status(f"[cyan]{label}[/]", spinner="dots"):
+                yield
+        except KeyboardInterrupt:
+            print()
+            raise
     else:
         print(f"  ... {label}")
-        yield
+        try:
+            yield
+        except KeyboardInterrupt:
+            print()
+            raise
 
 
 def use_color() -> bool:
