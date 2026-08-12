@@ -23,6 +23,7 @@ from config import MODEL, WORKDIR
 from harness import trigger_hooks
 from harness.memory import inject_memories
 from harness.permissions import install as install_permissions
+from harness.plan import get_plan_state
 from harness.render import (
     render_banner,
     render_help,
@@ -106,15 +107,18 @@ _prompt_session = _create_prompt_session()
 install_permissions()
 
 # -- helpers ---------------------------------------------------------------
-def _build_context() -> tuple[dict, list[dict], dict]:
-    """Assemble the context dict, tool list, and handler map for an agent turn."""
+def _build_context(allowed: set[str] | None = None) -> tuple[dict, list[dict], dict]:
+    """Assemble the context dict, tool list, and handler map for an agent turn.
+
+    If `allowed` is provided, only those tools are included (plan-mode restriction).
+    """
     ctx = {
         "workspace": str(WORKDIR),
         "memories": "",
         "mcp_servers": ", ".join(_mcp.mcp_clients.keys()),
     }
     ctx = inject_memories(ctx)
-    tools, handlers = assemble_tool_pool()
+    tools, handlers = assemble_tool_pool(allowed=allowed)
     ctx["enabled_tools"] = [t["name"] for t in tools]
     return ctx, tools, handlers
 
@@ -228,7 +232,81 @@ if __name__ == "__main__":
                 for m in inbox)
             history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
 
+        plan = get_plan_state()
+
+        # -- plan-mode: handle approval / revision ---------------------------
+        if plan.phase == "awaiting_approval":
+            decision = query.strip().lower()
+            if decision in ("y", "yes", ""):
+                plan.approve()
+                render_info("Plan approved. Executing...")
+                # Inject plan context and execute with full tools
+                history.append({"role": "user", "content": plan.plan_context})
+                ctx, tools, handlers = _build_context()
+                _agent_idle = False
+                with spinner("Executing plan..."):
+                    agent_loop_full(history, ctx, tools, handlers)
+                _agent_idle = True
+                plan.reset()
+                continue
+            if decision.startswith("r:") or decision.startswith("r "):
+                feedback = decision[2:].strip() or "Revise the plan."
+                render_info(f"Revising: {feedback}")
+                allowed = plan.revise(feedback)
+                history.append({"role": "user", "content": f"Revise the plan: {feedback}"})
+                ctx, tools, handlers = _build_context(allowed=set(allowed))
+                _agent_idle = False
+                with spinner("Revising plan..."):
+                    agent_loop_full(history, ctx, tools, handlers)
+                _agent_idle = True
+                # Check if agent produced a new plan
+                if plan.phase == "planning":
+                    # Extract plan from last response
+                    last = history[-1].get("content", []) if history else []
+                    if isinstance(last, list):
+                        for block in last:
+                            if getattr(block, "type", None) == "text":
+                                plan.submit_plan(block.text)
+                if plan.phase == "awaiting_approval":
+                    render_markdown(plan.plan_text)
+                    render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+                continue
+            if decision in ("n", "no"):
+                plan.reject()
+                render_info("Plan rejected.")
+                continue
+            # Any other input during approval: treat as feedback
+            render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+
+        # -- plan-mode: start planning ---------------------------------------
+        if query.strip().lower().startswith("/plan "):
+            task = query.strip()[6:]
+            plan.start_planning(task)
+            allowed = list(plan.READONLY_TOOLS)
+            history.append({"role": "user",
+                "content": f"Create a plan for: {task}. Use read-only tools to explore the codebase, then output your plan as a text response. Do NOT make any changes — just propose the approach."})
+            ctx, tools, handlers = _build_context(allowed=set(allowed))
+            _agent_idle = False
+            with spinner("Planning..."):
+                agent_loop_full(history, ctx, tools, handlers)
+            _agent_idle = True
+            # Extract plan text from response
+            last = history[-1].get("content", []) if history else []
+            if isinstance(last, list):
+                for block in last:
+                    if getattr(block, "type", None) == "text":
+                        plan.submit_plan(block.text)
+            if plan.phase == "awaiting_approval":
+                render_markdown(plan.plan_text)
+                render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+            continue
+
+        # -- normal execution ------------------------------------------------
         history.append({"role": "user", "content": query})
+
+        # If we're in executing phase, inject plan context
+        if plan.phase == "executing":
+            pass  # plan already injected on approval
 
         ctx, tools, handlers = _build_context()
 

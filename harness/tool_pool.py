@@ -17,7 +17,7 @@ from tools.teams import (
 from tools.worktree import create_worktree, keep_worktree, remove_worktree
 
 
-def assemble_tool_pool() -> tuple[list[dict], dict]:
+def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dict]:
     tools = [
         # s01/s02: file tools
         {"name": "bash", "description": "Run a shell command.", "input_schema": {
@@ -150,5 +150,8 @@ def assemble_tool_pool() -> tuple[list[dict], dict]:
                     return _client.call_tool(_tool_name, kwargs)
                 return _handler
             handlers[prefixed] = _make_mcp_handler(mcp_client, td["name"])
+
+    if allowed is not None:
+        tools = [t for t in tools if t["name"] in allowed]
 
     return tools, handlers
