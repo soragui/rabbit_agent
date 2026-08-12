@@ -283,7 +283,6 @@ if __name__ == "__main__":
                             if getattr(block, "type", None) == "text":
                                 plan.submit_plan(block.text)
                 if plan.phase == "awaiting_approval":
-                    render_markdown(plan.plan_text)
                     render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
                 continue
             if decision in ("n", "no"):
@@ -312,7 +311,6 @@ if __name__ == "__main__":
                     if getattr(block, "type", None) == "text":
                         plan.submit_plan(block.text)
             if plan.phase == "awaiting_approval":
-                render_markdown(plan.plan_text)
                 render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
             continue
 
