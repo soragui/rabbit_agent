@@ -51,7 +51,7 @@ except ImportError:
 _AGENT_COMMANDS = ["q", "exit", "quit", "?"]
 _AGENT_TOOLS = [
     "bash", "read_file", "write_file", "edit_file", "glob",
-    "todo_write", "task", "load_skill", "compact",
+    "todo_write", "structured_output", "task", "load_skill", "compact",
     "create_task", "list_tasks", "get_task", "claim_task", "complete_task",
     "schedule_cron", "list_crons", "cancel_cron",
     "spawn_teammate", "send_message", "check_inbox",

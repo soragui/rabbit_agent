@@ -1,4 +1,6 @@
 """s19: Tool Pool Assembly — build complete tool list + handler map."""
+import json as _json
+
 from config import normalize_name
 from tools import mcp, run_bash, run_edit, run_glob, run_grep, run_read, run_write, todo
 from tools.cron import cancel_job, list_crons, schedule_job
@@ -15,6 +17,17 @@ from tools.teams import (
     spawn_teammate_thread,
 )
 from tools.worktree import create_worktree, keep_worktree, remove_worktree
+
+
+def _handle_structured_output(format_description: str, data: dict) -> str:
+    """Validate and format structured JSON output from the model."""
+    try:
+        formatted = _json.dumps(data, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        return f"Structured output error: invalid JSON data — {e}"
+    if format_description:
+        return f"Structured output ({format_description}):\n```json\n{formatted}\n```"
+    return f"```json\n{formatted}\n```"
 
 
 def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dict]:
@@ -43,6 +56,11 @@ def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dic
                 "type": "object", "properties": {"content": {"type": "string"},
                 "status": {"type": "string", "enum": ["pending", "in_progress", "completed"]}},
                 "required": ["content", "status"]}}}, "required": ["todos"]}},
+        {"name": "structured_output", "description": "Produce structured JSON output. Call this instead of writing JSON in a text response when the user asks for structured data.", "input_schema": {
+            "type": "object", "properties": {
+                "format_description": {"type": "string", "description": "Describe the JSON shape you are producing"},
+                "data": {"type": "object", "description": "The structured data"},
+            }, "required": ["data"]}},
         # s06
         {"name": "task", "description": "Launch a subagent. Returns final conclusion.", "input_schema": {
             "type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]}},
@@ -109,7 +127,8 @@ def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dic
         "edit_file":       lambda **kw: run_edit(kw["path"], kw.get("old_text", ""), kw.get("new_text", "")),
         "glob":            lambda **kw: run_glob(kw["pattern"]),
         "grep":            lambda **kw: run_grep(kw["pattern"], kw.get("path", "."), kw.get("max_results", 50)),
-        "todo_write":      lambda **kw: todo.run_todo_write(kw["todos"]),
+        "todo_write":         lambda **kw: todo.run_todo_write(kw["todos"]),
+        "structured_output":  lambda **kw: _handle_structured_output(kw.get("format_description", ""), kw.get("data", {})),
         "task":            lambda **kw: spawn_subagent(kw["description"]),
         "load_skill":      lambda **kw: run_load_skill(kw["name"]),
         "compact":         lambda **kw: "[Compacted.]",
