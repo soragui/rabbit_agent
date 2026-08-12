@@ -1,5 +1,4 @@
 """s09: Memory — file-backed persistent memory storage."""
-import json
 
 from config import MEMORY_DIR
 from tools.skills import _parse_frontmatter

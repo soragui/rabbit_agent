@@ -1,12 +1,67 @@
 """s01-s20: Agent Loop — all mechanisms on one while True."""
-from config import DEFAULT_MAX_TOKENS, ESCALATED_MAX_TOKENS, MAX_RECOVERY_RETRIES, client
+import time as _time
+
+from anthropic import APIStatusError
+
+from config import (
+    DEFAULT_MAX_TOKENS,
+    ESCALATED_MAX_TOKENS,
+    FALLBACK_MODEL,
+    MAX_RECOVERY_RETRIES,
+    MAX_RETRIES,
+    provider,
+)
 from harness import trigger_hooks
-from harness.background import should_run_background, start_background_task, collect_background_results
-from harness.compact import run_compaction_pipeline, reactive_compact, safe_messages_slice
-from harness.recovery import RecoveryState, with_retry
+from harness.background import (
+    collect_background_results,
+    should_run_background,
+    start_background_task,
+)
+from harness.compact import reactive_compact, run_compaction_pipeline, safe_messages_slice
 from harness.prompt import assemble_system_prompt
-from harness.render import render_error, render_info, spinner
+from harness.recovery import RecoveryState, _retry_delay
+from harness.render import render_error, render_info, streaming_renderer
 from tools.todo import CURRENT_TODOS, get_todo_round, increment_todo_round, reset_todo_round
+
+
+def _stream_llm(messages, tools, state, system, max_tokens):
+    """Stream an LLM response with retry on 429/529, rendering text live.
+
+    Returns the final Message (same shape as a blocking response).
+    Raises on non-retryable errors.
+    """
+    for attempt in range(MAX_RETRIES):
+        try:
+            stream = provider.create_message_stream(
+                model=state.current_model, system=system,
+                messages=safe_messages_slice(messages, 100),
+                tools=tools, max_tokens=max_tokens,
+            )
+            with streaming_renderer() as render:
+                text_buf: list[str] = []
+                with stream as event_stream:
+                    for event in event_stream:
+                        if event.type == "content_block_delta":
+                            delta = event.delta
+                            if delta.type == "text_delta":
+                                text_buf.append(delta.text)
+                                render("".join(text_buf))
+                return stream.get_final_message()
+        except APIStatusError as e:
+            if e.status_code not in (429, 529):
+                raise
+            if attempt >= MAX_RETRIES - 1:
+                break
+            delay = _retry_delay(attempt)
+            render_info(f"Retry {e.status_code} — waiting {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})")
+            _time.sleep(delay)
+            if e.status_code == 529:
+                state.consecutive_529 += 1
+                if state.consecutive_529 >= 3 and FALLBACK_MODEL:
+                    render_info(f"Switching to fallback model: {FALLBACK_MODEL}")
+                    state.current_model = FALLBACK_MODEL
+    msg = f"Max retries ({MAX_RETRIES}) exceeded"
+    raise Exception(msg)
 
 
 def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: dict):
@@ -18,20 +73,14 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
         # compaction pipeline
         messages[:] = run_compaction_pipeline(messages)
 
-        # LLM call with error recovery
+        # LLM call — streaming with live render
         try:
-            with spinner(f"Calling {state.current_model}..."):
-                response = with_retry(
-                    lambda: client.messages.create(
-                        model=state.current_model, system=system,
-                        messages=safe_messages_slice(messages, 100),
-                        tools=tools, max_tokens=max_tokens),
-                    state)
+            response = _stream_llm(messages, tools, state, system, max_tokens)
         except KeyboardInterrupt:
             print()
             render_info("Interrupted.")
             return
-        except Exception as e:
+        except APIStatusError as e:
             err_str = str(e).lower()
             if "prompt_too_long" in err_str or "413" in err_str:
                 if not state.has_attempted_reactive_compact:
@@ -40,6 +89,9 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
                     continue
                 render_error("Context still too long after compact.")
                 return
+            render_error(str(e))
+            return
+        except Exception as e:
             render_error(str(e))
             return
 

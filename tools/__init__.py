@@ -3,7 +3,6 @@
 Also re-exports from the submodules so other code can ``from tools import ...``.
 """
 import subprocess as _subprocess
-from pathlib import Path as _Path
 
 from config import WORKDIR, safe_path
 
@@ -39,11 +38,20 @@ def run_write(path: str, content: str) -> str:
 
 def run_edit(path: str, old_text: str, new_text: str) -> str:
     try:
-        text = safe_path(path).read_text()
-        if old_text not in text:
+        before = safe_path(path).read_text()
+        if old_text not in before:
             return f"Error: text not found in {path}"
-        safe_path(path).write_text(text.replace(old_text, new_text, 1))
-        return f"Edited {path}"
+        after = before.replace(old_text, new_text, 1)
+        safe_path(path).write_text(after)
+
+        import difflib
+        diff = difflib.unified_diff(
+            before.splitlines(keepends=True),
+            after.splitlines(keepends=True),
+            fromfile=f"a/{path}", tofile=f"b/{path}",
+        )
+        diff_text = "".join(diff)
+        return f"Edited {path}\n\n```diff\n{diff_text}```"
     except Exception as e:
         return f"Error: {e}"
 
@@ -52,6 +60,35 @@ def run_glob(pattern: str) -> str:
     import glob as g
     matches = g.glob(pattern, root_dir=str(WORKDIR))
     return "\n".join(sorted(matches)) if matches else "(no matches)"
+
+
+def run_grep(pattern: str, path: str = ".", max_results: int = 50) -> str:
+    """Search file contents with ripgrep. Falls back to grep -r if rg is missing."""
+    try:
+        r = _subprocess.run(
+            ["rg", "--line-number", "--no-heading", "--color", "never",
+             "--max-count", str(max_results), pattern, path],
+            cwd=str(WORKDIR),
+            capture_output=True, text=True, timeout=30,
+        )
+        out = (r.stdout + r.stderr).strip()
+        return out[:50000] if out else "(no matches)"
+    except FileNotFoundError:
+        # ripgrep not installed — fall back to grep -r
+        try:
+            r = _subprocess.run(
+                ["grep", "-rn", "--color=never", "-m", str(max_results), pattern, path],
+                cwd=str(WORKDIR),
+                capture_output=True, text=True, timeout=30,
+            )
+            out = (r.stdout + r.stderr).strip()
+            return out[:50000] if out else "(no matches)"
+        except Exception as e:
+            return f"Grep error: {e}"
+    except _subprocess.TimeoutExpired:
+        return "Error: Grep timed out (30s)"
+    except Exception as e:
+        return f"Grep error: {e}"
 
 
 def run_git(args: list[str], cwd: str = None) -> tuple[bool, str]:

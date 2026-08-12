@@ -1,5 +1,4 @@
 """s07: Skill Loading — on-demand injection from skills/ directory."""
-import os
 from config import SKILLS_DIR
 
 try:

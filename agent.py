@@ -10,34 +10,124 @@ Config:
     Installed: ~/.51agent/settings.json
     Dev mode:  .env in the current directory
 """
-import sys, time, threading, os
+import sys
+import threading
+import time
 from pathlib import Path
-
-try:
-    import readline
-    readline.parse_and_bind('set bind-tty-special-chars off')
-    readline.parse_and_bind('set input-meta on')
-    readline.parse_and_bind('set output-meta on')
-    readline.parse_and_bind('set convert-meta off')
-except ImportError:
-    pass
 
 _script_dir = Path(__file__).resolve().parent
 if str(_script_dir) not in sys.path:
     sys.path.insert(0, str(_script_dir))
 
 from config import MODEL, WORKDIR
-from tools import mcp as _mcp
+from harness import trigger_hooks
+from harness.memory import inject_memories
+from harness.permissions import install as install_permissions
+from harness.render import (
+    render_banner,
+    render_help,
+    render_inbox,
+    render_info,
+    render_markdown,
+    spinner,
+)
+from harness.tool_pool import assemble_tool_pool
 from tools import cron as _cron
+from tools import mcp as _mcp
 from tools import teams as _teams
 
-from harness import trigger_hooks
-from harness.permissions import install as install_permissions
-from harness.memory import inject_memories
-from harness.tool_pool import assemble_tool_pool
-from harness.render import render_banner, render_help, render_markdown, render_inbox, render_error, render_info, render_tool_use, spinner, use_color, prompt as _prompt
+# -- prompt_toolkit input --------------------------------------------------
+try:
+    from prompt_toolkit import PromptSession
+    from prompt_toolkit.completion import PathCompleter, WordCompleter, merge_completers
+    from prompt_toolkit.history import FileHistory
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.styles import Style
+    _HAS_PROMPT_TOOLKIT = True
+except ImportError:
+    _HAS_PROMPT_TOOLKIT = False
+
+_AGENT_COMMANDS = ["q", "exit", "quit", "?"]
+_AGENT_TOOLS = [
+    "bash", "read_file", "write_file", "edit_file", "glob",
+    "todo_write", "task", "load_skill", "compact",
+    "create_task", "list_tasks", "get_task", "claim_task", "complete_task",
+    "schedule_cron", "list_crons", "cancel_cron",
+    "spawn_teammate", "send_message", "check_inbox",
+    "request_shutdown", "request_plan", "review_plan",
+    "create_worktree", "remove_worktree", "keep_worktree",
+    "connect_mcp",
+]
+
+_PROMPT_STYLE = Style.from_dict({
+    "prompt": "cyan bold",
+})
+
+_history_file = WORKDIR / ".agent_history"
+
+
+def _create_prompt_session() -> PromptSession | None:
+    """Create a prompt_toolkit session with completers and history.
+
+    Enter submits. Escape then Enter inserts a newline for multi-line input.
+    """
+    if not _HAS_PROMPT_TOOLKIT:
+        return None
+
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _submit(event):
+        """Enter submits the buffer."""
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add("escape", "enter")
+    def _newline(event):
+        """Escape+Enter inserts a literal newline."""
+        event.current_buffer.insert_text("\n")
+
+    completer = merge_completers([
+        WordCompleter(_AGENT_COMMANDS + _AGENT_TOOLS, ignore_case=True, sentence=True),
+        PathCompleter(expanduser=True),
+    ])
+    history = FileHistory(str(_history_file)) if _history_file else None
+    return PromptSession(
+        completer=completer,
+        history=history,
+        style=_PROMPT_STYLE,
+        multiline=True,
+        key_bindings=bindings,
+        message=[("class:prompt", "51agent >> ")],
+    )
+
+
+_prompt_session = _create_prompt_session()
 
 install_permissions()
+
+# -- helpers ---------------------------------------------------------------
+def _build_context() -> tuple[dict, list[dict], dict]:
+    """Assemble the context dict, tool list, and handler map for an agent turn."""
+    ctx = {
+        "workspace": str(WORKDIR),
+        "memories": "",
+        "mcp_servers": ", ".join(_mcp.mcp_clients.keys()),
+    }
+    ctx = inject_memories(ctx)
+    tools, handlers = assemble_tool_pool()
+    ctx["enabled_tools"] = [t["name"] for t in tools]
+    return ctx, tools, handlers
+
+
+def _render_last_response(history: list) -> None:
+    """Render text blocks from the last assistant message, if any."""
+    if not history:
+        return
+    last = history[-1].get("content", "") if isinstance(history[-1], dict) else ""
+    if isinstance(last, list):
+        for block in last:
+            if getattr(block, "type", None) == "text":
+                render_markdown(block.text)
 
 # -- cron queue processor --------------------------------------------------
 _agent_idle = True
@@ -50,11 +140,7 @@ def _deliver_cron_tasks():
     fired = _cron.consume_queue()
     if not fired:
         return
-    context = {"workspace": str(WORKDIR), "memories": "",
-               "mcp_servers": ", ".join(_mcp.mcp_clients.keys())}
-    context = inject_memories(context)
-    tools, handlers = assemble_tool_pool()
-    context["enabled_tools"] = [t["name"] for t in tools]
+    context, tools, handlers = _build_context()
     for job in fired:
         _history_ref.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
     agent_loop_full(_history_ref, context, tools, handlers)
@@ -96,7 +182,14 @@ if __name__ == "__main__":
 
     while True:
         try:
-            query = _prompt("51agent >> ")
+            if _prompt_session:
+                try:
+                    query = _prompt_session.prompt()
+                except (EOFError, OSError):
+                    # Non-TTY or closed pipe — fall through to input()
+                    query = input("\n51agent >> ")
+            else:
+                query = input("\n51agent >> ")
         except (EOFError, KeyboardInterrupt):
             print("\nBye.")
             break
@@ -116,18 +209,9 @@ if __name__ == "__main__":
                     for m in inbox)
                 history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
                 _agent_idle = False
-                ctx = {"workspace": str(WORKDIR), "memories": "",
-                       "mcp_servers": ", ".join(_mcp.mcp_clients.keys())}
-                ctx = inject_memories(ctx)
-                tools, handlers = assemble_tool_pool()
-                ctx["enabled_tools"] = [t["name"] for t in tools]
+                ctx, tools, handlers = _build_context()
                 agent_loop_full(history, ctx, tools, handlers)
                 _agent_idle = True
-                last = history[-1]["content"] if history else ""
-                if isinstance(last, list):
-                    for block in last:
-                        if getattr(block, "type", None) == "text":
-                            render_markdown(block.text)
             continue
 
         _agent_idle = False
@@ -146,11 +230,7 @@ if __name__ == "__main__":
 
         history.append({"role": "user", "content": query})
 
-        ctx = {"workspace": str(WORKDIR), "memories": "",
-               "mcp_servers": ", ".join(_mcp.mcp_clients.keys())}
-        ctx = inject_memories(ctx)
-        tools, handlers = assemble_tool_pool()
-        ctx["enabled_tools"] = [t["name"] for t in tools]
+        ctx, tools, handlers = _build_context()
 
         try:
             with spinner("Thinking..."):
@@ -170,10 +250,4 @@ if __name__ == "__main__":
                         break
 
         _agent_idle = True
-
-        last = history[-1]["content"] if history else ""
-        if isinstance(last, list):
-            for block in last:
-                if getattr(block, "type", None) == "text":
-                    render_markdown(block.text)
         print()

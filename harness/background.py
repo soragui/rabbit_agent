@@ -1,6 +1,5 @@
 """s13: Background Tasks — run slow operations in daemon threads."""
 import threading
-import time
 
 background_tasks: dict[str, dict] = {}
 background_results: dict[str, str] = {}

@@ -1,8 +1,8 @@
 """s18: Worktree Isolation — git worktree per task."""
 import re
 
-from config import WORKDIR, WORKTREES_DIR
-from tools import task_system, run_git
+from config import WORKTREES_DIR
+from tools import run_git, task_system
 
 
 def validate_worktree_name(name: str) -> str | None:

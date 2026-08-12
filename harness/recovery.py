@@ -1,11 +1,16 @@
 """s11: Error Recovery — retry with exponential backoff."""
-import time
 import random
+import time
 
 from anthropic import APIStatusError
-from config import BASE_DELAY_MS, ESCALATED_MAX_TOKENS, DEFAULT_MAX_TOKENS
-from config import MAX_RETRIES, MAX_RECOVERY_RETRIES, FALLBACK_MODEL, MODEL
-from harness.render import render_info, render_error
+
+from config import (
+    BASE_DELAY_MS,
+    FALLBACK_MODEL,
+    MAX_RETRIES,
+    MODEL,
+)
+from harness.render import render_info
 
 
 class RecoveryState:

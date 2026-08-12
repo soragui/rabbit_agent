@@ -1,16 +1,20 @@
 """s19: Tool Pool Assembly — build complete tool list + handler map."""
-from tools import mcp
-from tools import todo
-from tools.subagent import spawn_subagent
-from tools.skills import run_load_skill, SKILL_REGISTRY
-from tools.task_system import (create_task, list_tasks, get_task, claim_task, complete_task)
-from tools.cron import schedule_job, list_crons, cancel_job
-from tools.teams import (spawn_teammate_thread, run_send_message, run_check_inbox,
-                         run_request_shutdown, run_request_plan, run_review_plan)
-from tools.worktree import create_worktree, remove_worktree, keep_worktree
-from tools.mcp import run_connect_mcp
-from tools import run_bash, run_read, run_write, run_edit, run_glob
 from config import normalize_name
+from tools import mcp, run_bash, run_edit, run_glob, run_grep, run_read, run_write, todo
+from tools.cron import cancel_job, list_crons, schedule_job
+from tools.mcp import run_connect_mcp
+from tools.skills import run_load_skill
+from tools.subagent import spawn_subagent
+from tools.task_system import claim_task, complete_task, create_task, get_task, list_tasks
+from tools.teams import (
+    run_check_inbox,
+    run_request_plan,
+    run_request_shutdown,
+    run_review_plan,
+    run_send_message,
+    spawn_teammate_thread,
+)
+from tools.worktree import create_worktree, keep_worktree, remove_worktree
 
 
 def assemble_tool_pool() -> tuple[list[dict], dict]:
@@ -30,6 +34,9 @@ def assemble_tool_pool() -> tuple[list[dict], dict]:
             "new_text": {"type": "string"}}, "required": ["path", "old_text", "new_text"]}},
         {"name": "glob", "description": "Find files by pattern.", "input_schema": {
             "type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]}},
+        {"name": "grep", "description": "Search file contents with ripgrep.", "input_schema": {
+            "type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string"},
+            "max_results": {"type": "integer"}}, "required": ["pattern"]}},
         # s05
         {"name": "todo_write", "description": "Manage session task list.", "input_schema": {
             "type": "object", "properties": {"todos": {"type": "array", "items": {
@@ -101,6 +108,7 @@ def assemble_tool_pool() -> tuple[list[dict], dict]:
         "write_file":      lambda **kw: run_write(kw["path"], kw["content"]),
         "edit_file":       lambda **kw: run_edit(kw["path"], kw.get("old_text", ""), kw.get("new_text", "")),
         "glob":            lambda **kw: run_glob(kw["pattern"]),
+        "grep":            lambda **kw: run_grep(kw["pattern"], kw.get("path", "."), kw.get("max_results", 50)),
         "todo_write":      lambda **kw: todo.run_todo_write(kw["todos"]),
         "task":            lambda **kw: spawn_subagent(kw["description"]),
         "load_skill":      lambda **kw: run_load_skill(kw["name"]),

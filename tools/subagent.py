@@ -1,7 +1,7 @@
 """s06: Subagent — isolated-context task delegation."""
-from tools import run_bash, run_read, run_write, run_edit, run_glob
 from config import MODEL, client
 from harness.render import render_info, render_tool_use, spinner
+from tools import run_bash, run_edit, run_glob, run_read, run_write
 
 SUB_TOOLS = [
     {"name": "bash", "description": "Run a shell command.", "input_schema": {

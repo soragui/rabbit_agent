@@ -1,7 +1,7 @@
 """s03: Permission hooks — deny-list + rules + user prompt."""
 from config import WORKDIR
 from harness import register_hook
-from harness.render import render_tool_use, render_info, render_error
+from harness.render import render_info, render_tool_use
 
 DENY_LIST = [
     "rm -rf /", "sudo rm -rf", "shutdown now", "reboot", "mkfs",
@@ -36,7 +36,7 @@ def _permission_hook(block):
             if not str(p).startswith(str(WORKDIR.resolve())):
                 return f"Permission denied: path '{path}' outside workspace"
         except Exception:
-            return f"Permission denied: invalid path"
+            return "Permission denied: invalid path"
 
     return None
 

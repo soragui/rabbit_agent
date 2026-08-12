@@ -3,21 +3,20 @@ import sys
 from contextlib import contextmanager
 
 try:
+    from rich import box
     from rich.console import Console as _RichConsole
+    from rich.live import Live
     from rich.markdown import Markdown
     from rich.panel import Panel
     from rich.rule import Rule
-    from rich.text import Text
     from rich.table import Table
-    from rich import box
+    from rich.text import Text
     _HAS_RICH = True
 except ImportError:
     _HAS_RICH = False
+    Live = None  # type: ignore[assignment,misc]
 
-if _HAS_RICH:
-    _console = _RichConsole(highlight=True)
-else:
-    _console = None
+_console = _RichConsole(highlight=True) if _HAS_RICH else None
 
 
 def render_banner(model: str, workdir: str) -> None:
@@ -113,6 +112,36 @@ def spinner(label: str = "Thinking..."):
         print(f"  ... {label}")
         try:
             yield
+        except KeyboardInterrupt:
+            print()
+            raise
+
+
+@contextmanager
+def streaming_renderer():
+    """Context manager that renders markdown incrementally as text arrives.
+
+    Usage:
+        with streaming_renderer() as render:
+            for chunk in stream:
+                render(accumulated_text)
+    """
+    if not _HAS_RICH:
+        chunks: list[str] = []
+        def _add(text: str) -> None:
+            chunks.append(text)
+        yield _add
+        print("".join(chunks))
+        return
+
+    buf: list[str] = []
+    with Live(Markdown(""), console=_console, refresh_per_second=10) as live:
+        def _add(text: str) -> None:
+            buf.append(text)
+            live.update(Markdown("".join(buf)))
+
+        try:
+            yield _add
         except KeyboardInterrupt:
             print()
             raise

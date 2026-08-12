@@ -2,8 +2,14 @@
 import json
 import time
 
-from config import (TRANSCRIPT_DIR, TOOL_RESULTS_DIR, KEEP_RECENT_TOOL_RESULTS,
-                    client, MODEL, PERSIST_THRESHOLD)
+from config import (
+    KEEP_RECENT_TOOL_RESULTS,
+    MODEL,
+    PERSIST_THRESHOLD,
+    TOOL_RESULTS_DIR,
+    TRANSCRIPT_DIR,
+    client,
+)
 
 
 def _message_has_tool_use(msg: dict) -> bool:
@@ -113,7 +119,7 @@ def tool_result_budget(messages, max_bytes=PERSIST_THRESHOLD):
     if total <= max_bytes:
         return messages
     ranked = sorted(blocks, key=lambda p: len(str(p[1].get("content", ""))), reverse=True)
-    for idx, block in ranked:
+    for _idx, block in ranked:
         if total <= max_bytes:
             break
         block["content"] = _persist_large_output(

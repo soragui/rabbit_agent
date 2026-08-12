@@ -38,10 +38,15 @@ def _load_settings() -> dict:
 
 _settings = _load_settings()
 
-# -- client ----------------------------------------------------------------
+# -- client (legacy — kept for modules not yet migrated to provider) ---------
 _api_key = _settings.get("api_key") or os.environ.get("ANTHROPIC_API_KEY", "MISSING_API_KEY")
 _base_url = _settings.get("api_base_url") or os.environ.get("ANTHROPIC_BASE_URL")
 client = Anthropic(api_key=_api_key, base_url=_base_url) if _base_url else Anthropic(api_key=_api_key)
+
+# -- provider (Wave 1) --------------------------------------------------------
+from harness.providers import AnthropicProvider  # noqa: E402 (after path setup)
+
+provider = AnthropicProvider(api_key=_api_key, base_url=_base_url)
 
 MODEL = _settings.get("model") or os.environ.get("MODEL_ID", "claude-sonnet-4-6")
 FALLBACK_MODEL = _settings.get("fallback_model") or os.environ.get("FALLBACK_MODEL_ID") or None

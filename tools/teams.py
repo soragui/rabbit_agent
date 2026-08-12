@@ -1,12 +1,16 @@
 """s15/s16/s17: Agent Teams — MessageBus, protocols, spawn, idle loop."""
-import json, time, threading, random, copy
-from pathlib import Path
+import copy
+import json
+import random
+import threading
+import time
 from dataclasses import dataclass
+from pathlib import Path
 
-from config import MODEL, WORKDIR, MAILBOX_DIR, WORKTREES_DIR, client
+from config import MAILBOX_DIR, MODEL, WORKTREES_DIR, client
+from harness.render import render_error, spinner
 from tools import task_system
 from tools.cron import _lock  # noqa: F401 — keep for future use
-from harness.render import render_error, render_info, spinner
 
 
 # -- MessageBus ------------------------------------------------------------

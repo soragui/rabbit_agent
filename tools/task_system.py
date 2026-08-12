@@ -1,6 +1,8 @@
 """s12: Task System — file-persisted task graph with dependency tracking."""
-import json, time, random
-from dataclasses import dataclass, asdict
+import json
+import random
+import time
+from dataclasses import asdict, dataclass
 
 from config import TASKS_DIR
 
@@ -71,10 +73,10 @@ def complete_task(task_id: str) -> str:
     unblocked = []
     for f in sorted(TASKS_DIR.glob("task_*.json")):
         t = json.loads(f.read_text())
-        if t.get("status") == "pending" and t.get("blockedBy"):
-            if all(_path(d).exists() and _load(d).status == "completed"
-                   for d in t["blockedBy"]):
-                unblocked.append(t["subject"])
+        if t.get("status") == "pending" and t.get("blockedBy") and all(
+            _path(d).exists() and _load(d).status == "completed" for d in t["blockedBy"]
+        ):
+            unblocked.append(t["subject"])
     msg = f"Completed {task_id} ({task.subject})"
     if unblocked:
         msg += f"\nUnblocked: {', '.join(unblocked)}"

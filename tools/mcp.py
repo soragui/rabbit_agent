@@ -1,6 +1,4 @@
 """s19: MCP Plugin — external tools via standard protocol."""
-import re
-from config import normalize_name
 
 
 class MCPClient:
