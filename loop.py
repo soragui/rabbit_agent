@@ -46,7 +46,7 @@ def _stream_llm(messages, tools, state, system, max_tokens):
                             if delta.type == "text_delta":
                                 text_buf.append(delta.text)
                                 render("".join(text_buf))
-                return stream.get_final_message()
+                return event_stream.get_final_message()
         except APIStatusError as e:
             if e.status_code not in (429, 529):
                 raise

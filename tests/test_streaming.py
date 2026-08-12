@@ -50,9 +50,11 @@ class TestStreamLLMRetry:
                     response=MagicMock(status_code=529),
                     body={},
                 )
+            inner = MagicMock()
+            inner.__iter__ = MagicMock(return_value=iter([]))
+            inner.get_final_message.return_value = mock_final
             result = MagicMock()
-            result.__enter__ = MagicMock(return_value=iter([]))
-            result.get_final_message.return_value = mock_final
+            result.__enter__ = MagicMock(return_value=inner)
             return result
 
         with patch("loop.provider") as mock_provider, patch("loop._time.sleep"):
