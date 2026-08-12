@@ -2,7 +2,18 @@
 import json as _json
 
 from config import normalize_name
-from tools import mcp, run_bash, run_edit, run_glob, run_grep, run_read, run_write, todo
+from tools import (
+    mcp,
+    run_bash,
+    run_edit,
+    run_glob,
+    run_grep,
+    run_read,
+    run_web_fetch,
+    run_web_search,
+    run_write,
+    todo,
+)
 from tools.cron import cancel_job, list_crons, schedule_job
 from tools.mcp import run_connect_mcp
 from tools.skills import run_load_skill
@@ -116,8 +127,12 @@ def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dic
         {"name": "keep_worktree", "description": "Keep a worktree for review.", "input_schema": {
             "type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
         # s19
-        {"name": "connect_mcp", "description": "Connect to an MCP server.", "input_schema": {
-            "type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+        {"name": "connect_mcp", "description": "Connect to an MCP server. Pass 'command' to spawn a stdio server (e.g. 'npx -y @modelcontextprotocol/server-filesystem /tmp'), or omit for mock servers.", "input_schema": {
+            "type": "object", "properties": {"name": {"type": "string"}, "command": {"type": "string"}}, "required": ["name"]}},
+        {"name": "web_fetch", "description": "Fetch a URL and return its content as markdown.", "input_schema": {
+            "type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+        {"name": "web_search", "description": "Search the web (DuckDuckGo, no API key needed).", "input_schema": {
+            "type": "object", "properties": {"query": {"type": "string"}, "max_results": {"type": "integer"}}, "required": ["query"]}},
     ]
 
     handlers = {
@@ -149,7 +164,9 @@ def assemble_tool_pool(allowed: set[str] | None = None) -> tuple[list[dict], dic
         "create_worktree": lambda **kw: create_worktree(kw["name"], kw.get("task_id", "")),
         "remove_worktree": lambda **kw: remove_worktree(kw["name"], kw.get("discard_changes", False)),
         "keep_worktree":   lambda **kw: keep_worktree(kw["name"]),
-        "connect_mcp":     lambda **kw: run_connect_mcp(kw["name"]),
+        "connect_mcp":     lambda **kw: run_connect_mcp(kw["name"], kw.get("command", "")),
+        "web_fetch":       lambda **kw: run_web_fetch(kw["url"]),
+        "web_search":      lambda **kw: run_web_search(kw["query"], kw.get("max_results", 8)),
     }
 
     # -- MCP tools --------------------------------------------------------

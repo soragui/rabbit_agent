@@ -20,7 +20,7 @@ SAFE = {
 
 ASK_ONCE = {
     "bash", "write_file", "edit_file", "task", "create_task", "claim_task",
-    "complete_task", "send_message",
+    "complete_task", "send_message", "web_fetch",
 }
 
 ALWAYS_ASK = {

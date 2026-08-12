@@ -32,6 +32,7 @@ from harness.render import (
     render_markdown,
     spinner,
 )
+from harness.session import find_latest_session, load_session, save_session
 from harness.tool_pool import assemble_tool_pool
 from tools import cron as _cron
 from tools import mcp as _mcp
@@ -176,10 +177,23 @@ if __name__ == "__main__":
     render_help()
 
     import atexit
-    atexit.register(lambda: print("\n51agent shut down. Goodbye!"))
 
     history: list = []
     _history_ref = history
+    atexit.register(lambda: save_session(history))
+
+    # Offer to resume last session
+    latest = find_latest_session()
+    if latest:
+        try:
+            choice = input(f"\n  Resume session from {time.ctime(latest.stat().st_mtime)}? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            choice = "n"
+        if choice in ("y", "yes"):
+            loaded = load_session(latest)
+            if loaded:
+                history[:] = loaded
+                render_info(f"Resumed session with {len(history)} messages.")
 
     threading.Thread(target=_cron.scheduler_loop, daemon=True, name="cron").start()
     threading.Thread(target=queue_processor_loop, daemon=True, name="cron-queue").start()
@@ -199,6 +213,7 @@ if __name__ == "__main__":
             break
 
         if query.strip().lower() in ("q", "exit", "quit"):
+            save_session(history)
             break
         if query.strip().lower() == "?":
             render_help()

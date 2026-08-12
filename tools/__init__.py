@@ -91,6 +91,88 @@ def run_grep(pattern: str, path: str = ".", max_results: int = 50) -> str:
         return f"Grep error: {e}"
 
 
+def run_web_fetch(url: str) -> str:
+    """Fetch a URL and return its content as markdown text."""
+    import html2text as _html2text
+    import httpx
+    try:
+        resp = httpx.get(url, follow_redirects=True, timeout=30)
+        resp.raise_for_status()
+        ct = resp.headers.get("content-type", "")
+        if "text/html" in ct:
+            h = _html2text.HTML2Text()
+            h.ignore_links = False
+            h.ignore_images = True
+            markdown = h.handle(resp.text)
+            return markdown[:50000] if len(markdown) > 50000 else markdown
+        return resp.text[:50000]
+    except Exception as e:
+        return f"Web fetch error: {e}"
+
+
+def run_web_search(query: str, max_results: int = 8) -> str:
+    """Search the web using DuckDuckGo (no API key required)."""
+    import httpx
+    try:
+        resp = httpx.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers={"User-Agent": "51agent/0.1"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        from html.parser import HTMLParser as _HTMLParser
+
+        results = []
+        current = {}
+        in_link = False
+
+        class _Parser(_HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                nonlocal current, in_link
+                d = dict(attrs)
+                if tag == "a" and "result__a" in d.get("class", ""):
+                    current = {"title": "", "url": d.get("href", "").replace("//duckduckgo.com/l/?uddg=", "")}
+                    in_link = True
+                elif tag == "a" and "result__snippet" in d.get("class", ""):
+                    current["snippet"] = ""
+
+            def handle_data(self, data):
+                nonlocal current, in_link
+                if in_link and "title" in current:
+                    current["title"] += data
+                elif "snippet" in current:
+                    current["snippet"] += data
+
+            def handle_endtag(self, tag):
+                nonlocal current, in_link, results
+                if tag == "a" and in_link:
+                    in_link = False
+                elif tag == "a" and "snippet" in current:
+                    if current.get("title"):
+                        results.append(dict(current))
+                    current = {}
+                if len(results) >= max_results:
+                    pass
+
+        _Parser().feed(resp.text)
+
+        if not results:
+            # Fallback: return raw text snippet
+            return f"No structured results found for '{query}'. Try a different query."
+
+        lines = [f"Search results for '{query}':"]
+        for i, r in enumerate(results[:max_results], 1):
+            title = r.get("title", "").strip()
+            snippet = r.get("snippet", "").strip()
+            lines.append(f"\n{i}. {title}")
+            if snippet:
+                lines.append(f"   {snippet[:200]}")
+        return "\n".join(lines)[:50000]
+    except Exception as e:
+        return f"Web search error: {e}"
+
+
 def run_git(args: list[str], cwd: str = None) -> tuple[bool, str]:
     """Run a git command, return (success, output)."""
     try:
