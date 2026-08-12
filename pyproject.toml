@@ -5,6 +5,7 @@ description = "From-scratch coding agent — progressive learning from bare loop
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=0.121.0",
+    "openai>=2.54.0",
     "prompt-toolkit>=3.0.53",
     "python-dotenv>=1.2.2",
     "pyyaml>=6.0.3",
