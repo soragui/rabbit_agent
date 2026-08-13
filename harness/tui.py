@@ -204,6 +204,7 @@ _kb = KeyBindings()
 
 
 @_kb.add("enter")
+@_kb.add("c-j")  # LF (piped/newline input) — real Enter sends CR, also covered
 def _submit(event):
     if event.current_buffer is _input_buffer:
         event.current_buffer.validate_and_handle()
@@ -257,7 +258,10 @@ def _route_line(line: str) -> None:
         try:
             ok = _on_line(line, _history)
             if not ok:
-                _app.call_from_executor(_app.exit)
+                # Schedule the exit on the event loop thread (the removed
+                # call_from_executor's semantics; Application.exit is invoked
+                # from the loop, not from this worker thread).
+                _app.loop.call_soon_threadsafe(_app.exit)
         except Exception as e:
             bridge.emit("chat", f"✗ turn crashed: {e}", style="error")
         finally:
@@ -317,11 +321,14 @@ def run_tui(history: list, on_line) -> None:
     if latest:
         threading.Thread(target=_startup_worker, daemon=True, name="resume").start()
 
-    _app.create_background_task(_event_consumer())
-    _app.create_background_task(_status_loop())
+    def _start_background():
+        # pre_run fires after the event loop starts; closes over the module
+        # global _app (prompt_toolkit calls the hook with no arguments).
+        _app.create_background_task(_event_consumer())
+        _app.create_background_task(_status_loop())
 
     try:
-        _app.run()
+        _app.run(pre_run=_start_background)
     finally:
         _render.set_tui_active(False)
 
