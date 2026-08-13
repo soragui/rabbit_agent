@@ -20,8 +20,25 @@ from harness.background import (
 from harness.compact import reactive_compact, run_compaction_pipeline, safe_messages_slice
 from harness.prompt import assemble_system_prompt
 from harness.recovery import RecoveryState, _retry_delay
-from harness.render import render_error, render_info, streaming_renderer
+from harness.render import (
+    render_activity,
+    render_error,
+    render_info,
+    render_tool_result,
+    streaming_renderer,
+)
+from harness.status import tracker
+from harness.ui_bridge import TurnAborted, bridge
 from tools.todo import CURRENT_TODOS, get_todo_round, increment_todo_round, reset_todo_round
+
+
+def _sleep_interruptible(seconds: float) -> None:
+    """Sleep in 0.1s slices, aborting early on Ctrl+C."""
+    deadline = _time.monotonic() + seconds
+    while _time.monotonic() < deadline:
+        if bridge.is_abort_requested():
+            raise TurnAborted()
+        _time.sleep(min(0.1, deadline - _time.monotonic()))
 
 
 def _stream_llm(messages, tools, state, system, max_tokens):
@@ -41,12 +58,16 @@ def _stream_llm(messages, tools, state, system, max_tokens):
                 text_buf: list[str] = []
                 with stream as event_stream:
                     for event in event_stream:
+                        if bridge.is_abort_requested():
+                            raise TurnAborted()
                         if event.type == "content_block_delta":
                             delta = event.delta
                             if delta.type == "text_delta":
                                 text_buf.append(delta.text)
                                 render("".join(text_buf))
-                return event_stream.get_final_message()
+                msg = event_stream.get_final_message()
+                tracker.update(getattr(msg, "usage", None))
+                return msg
         except APIStatusError as e:
             if e.status_code not in (429, 529):
                 raise
@@ -54,7 +75,7 @@ def _stream_llm(messages, tools, state, system, max_tokens):
                 break
             delay = _retry_delay(attempt)
             render_info(f"Retry {e.status_code} — waiting {delay:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})")
-            _time.sleep(delay)
+            _sleep_interruptible(delay)
             if e.status_code == 529:
                 state.consecutive_529 += 1
                 if state.consecutive_529 >= 3 and FALLBACK_MODEL:
@@ -76,6 +97,9 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
         # LLM call — streaming with live render
         try:
             response = _stream_llm(messages, tools, state, system, max_tokens)
+        except TurnAborted:
+            render_info("Interrupted.")
+            return
         except KeyboardInterrupt:
             print()
             render_info("Interrupted.")
@@ -124,6 +148,8 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
 
         # s13: collect background notifications
         bg_notifications = collect_background_results()
+        for n in bg_notifications:
+            render_activity(" ".join(n.splitlines())[:160], style="bg")
 
         # execute tools
         results = []
@@ -138,6 +164,7 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
             blocked = trigger_hooks("PreToolUse", block)
             if blocked:
                 results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(blocked)})
+                render_tool_result(block.name, str(blocked), ok=False)
                 continue
 
             # s13: background dispatch
@@ -146,6 +173,7 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
                 bg_id = start_background_task(block, handler)
                 results.append({"type": "tool_result", "tool_use_id": block.id,
                                 "content": f"[Background task {bg_id} started] Will notify when complete."})
+                render_activity(f"⏳ {block.name} → background ({bg_id})", style="running")
                 continue
 
             # normal execution
@@ -157,6 +185,9 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
 
             trigger_hooks("PostToolUse", block, output)
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
+            ok = not (str(output).startswith("Error")
+                      or str(output).startswith("Permission denied"))
+            render_tool_result(block.name, str(output), ok=ok)
 
         # compose user message: bg notifications + tool results
         user_content = [{"type": "text", "text": n} for n in bg_notifications]

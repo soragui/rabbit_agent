@@ -57,7 +57,7 @@ class TestStreamLLMRetry:
             result.__enter__ = MagicMock(return_value=inner)
             return result
 
-        with patch("loop.provider") as mock_provider, patch("loop._time.sleep"):
+        with patch("loop.provider") as mock_provider, patch("loop._sleep_interruptible"):
             mock_provider.create_message_stream.side_effect = mock_create_stream
             response = _stream_llm(messages, tools, state, system, max_tokens=500)
 
@@ -77,7 +77,7 @@ class TestStreamLLMRetry:
         tools = []
         system = "test"
 
-        with patch("loop.provider") as mock_provider, patch("loop._time.sleep"):
+        with patch("loop.provider") as mock_provider, patch("loop._sleep_interruptible"):
             mock_provider.create_message_stream.side_effect = APIStatusError(
                 message="Overloaded",
                 response=MagicMock(status_code=529),
@@ -109,7 +109,7 @@ class TestStreamLLMRetry:
 
         with (
             patch("loop.provider") as mock_provider,
-            patch("loop._time.sleep"),
+            patch("loop._sleep_interruptible"),
             patch("loop.FALLBACK_MODEL", "fallback-model"),
         ):
             mock_provider.create_message_stream.side_effect = mock_create_stream

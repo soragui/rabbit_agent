@@ -1,8 +1,13 @@
 """Smoke tests for the agent loop and related harness components."""
+import time as _time
+import types
 from unittest.mock import MagicMock
+
+import pytest
 
 from harness.prompt import assemble_system_prompt
 from harness.recovery import RecoveryState
+from harness.ui_bridge import TurnAborted, bridge
 
 
 class TestRecoveryState:
@@ -88,3 +93,56 @@ class TestHookSystem:
         # just verify the call doesn't crash
         trigger_hooks("PostToolUse", MagicMock(), "output")
         HOOKS["PostToolUse"].clear()
+
+
+class TestSleepInterruptible:
+    def test_raises_when_abort_requested(self):
+        bridge.request_abort()
+        start = _time.monotonic()
+        with pytest.raises(TurnAborted):
+            from loop import _sleep_interruptible
+            _sleep_interruptible(5.0)
+        assert _time.monotonic() - start < 2.0
+        bridge.clear_abort()
+
+    def test_sleeps_when_no_abort(self):
+        bridge.clear_abort()
+        from loop import _sleep_interruptible
+        start = _time.monotonic()
+        _sleep_interruptible(0.2)
+        assert _time.monotonic() - start >= 0.2
+
+
+class TestStreamAbort:
+    def test_stream_raises_turn_aborted_mid_chunks(self, monkeypatch):
+        import loop as loop_mod
+        from loop import _stream_llm
+
+        class Evt:
+            def __init__(self):
+                self.type = "content_block_delta"
+                self.delta = types.SimpleNamespace(type="text_delta", text="x")
+
+        class FakeStream:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+            def __iter__(self):
+                for _ in range(50):
+                    yield Evt()
+                raise AssertionError("stream should have aborted")
+
+            def get_final_message(self):
+                return None
+
+        monkeypatch.setattr(
+            loop_mod.provider, "create_message_stream", lambda **kw: FakeStream())
+        monkeypatch.setattr(
+            loop_mod, "streaming_renderer", loop_mod.streaming_renderer)
+        bridge.request_abort()
+        with pytest.raises(TurnAborted):
+            _stream_llm([], [], RecoveryState(), "sys", 100)
+        bridge.clear_abort()
