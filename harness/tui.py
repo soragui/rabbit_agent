@@ -12,6 +12,7 @@ thread; render events arrive on the bridge queue and are consumed by
 an asyncio background task inside the application loop.
 """
 import asyncio
+import contextlib
 import sys
 import threading
 import time as _time
@@ -82,6 +83,7 @@ _inflight = False          # last chat entry is a live stream block
 _input_buffer: Buffer | None = None
 _chat_buffer: Buffer | None = None
 _activity_buffer: Buffer | None = None
+_status_segments: list[str] = []   # cached by the status thread
 
 
 def _reset_for_tests() -> None:
@@ -168,8 +170,16 @@ def _header_text() -> list[tuple[str, str]]:
     return parts
 
 
+def _refresh_status() -> None:
+    """Recompute the cached status segments (thread-safe, no UI calls)."""
+    global _status_segments
+    _status_segments = collect_status(WORKDIR, _state)
+
+
 def _status_text() -> list[tuple[str, str]]:
-    segments = collect_status(WORKDIR, state=_state)
+    segments = _status_segments
+    if not segments:
+        return [("class:status", " ")]
     return [("class:status", " " + " │ ".join(segments) + " ")]
 
 
@@ -281,11 +291,15 @@ async def _event_consumer() -> None:
         await asyncio.sleep(0.05)
 
 
-async def _status_loop() -> None:
-    """Re-render once a second so header/status pick up new state."""
+def _status_thread_loop() -> None:
+    """Timer thread: refresh status segments and re-render once a second."""
     while True:
-        get_app().invalidate()
-        await asyncio.sleep(1.0)
+        _refresh_status()
+        app = _app
+        if app is not None and app.loop is not None and not app.loop.is_closed():
+            with contextlib.suppress(RuntimeError):
+                app.loop.call_soon_threadsafe(app.invalidate)
+        _time.sleep(1.0)
 
 
 # -- startup ----------------------------------------------------------------
@@ -321,11 +335,13 @@ def run_tui(history: list, on_line) -> None:
     if latest:
         threading.Thread(target=_startup_worker, daemon=True, name="resume").start()
 
+    threading.Thread(
+        target=_status_thread_loop, daemon=True, name="status").start()
+
     def _start_background():
         # pre_run fires after the event loop starts; closes over the module
         # global _app (prompt_toolkit calls the hook with no arguments).
         _app.create_background_task(_event_consumer())
-        _app.create_background_task(_status_loop())
 
     try:
         _app.run(pre_run=_start_background)

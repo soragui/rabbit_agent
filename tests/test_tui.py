@@ -69,11 +69,24 @@ def test_header_includes_model_and_state(monkeypatch):
     assert "thinking" in joined
 
 
-def test_status_text_joins_segments(monkeypatch):
-    monkeypatch.setattr(
-        tui, "collect_status", lambda workdir, state: ["seg1", "seg2"])
+def test_status_text_joins_segments():
+    """_status_text renders the cached segments joined with ' │ '."""
+    tui._status_segments = ["seg1", "seg2"]
     text = tui._status_text()
     assert "seg1 │ seg2" in text[0][1]
+
+
+def test_status_text_empty_cache_shows_placeholder():
+    tui._status_segments = []
+    text = tui._status_text()
+    assert text[0][1] == " "
+
+
+def test_refresh_status_updates_cache(monkeypatch):
+    monkeypatch.setattr(
+        tui, "collect_status", lambda workdir, state: ["seg1", "seg2"])
+    tui._refresh_status()
+    assert tui._status_segments == ["seg1", "seg2"]
 
 
 def test_build_app_returns_full_screen_app():
