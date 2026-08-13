@@ -1,8 +1,12 @@
 """Smoke tests for file-system tools — bash, read, write, edit, glob, safe_path."""
 
+import threading
+import time as _time
+
 import pytest
 
 from config import WORKDIR, safe_path
+from harness.ui_bridge import bridge
 from tools import run_bash, run_edit, run_glob, run_grep, run_read, run_write
 
 
@@ -113,3 +117,25 @@ class TestBash:
     def test_command_not_found(self):
         result = run_bash("nonexistent_command_xyz_123")
         assert isinstance(result, str)
+
+
+class TestBashAbort:
+    def test_abort_kills_long_command(self):
+        bridge.clear_abort()
+        result = {}
+
+        def worker():
+            result["value"] = run_bash("sleep 5 && echo done")
+
+        t = threading.Thread(target=worker)
+        t.start()
+        _time.sleep(0.5)  # let the subprocess start
+        bridge.request_abort()
+        t.join(timeout=5)
+        assert not t.is_alive(), "run_bash did not abort within 5s"
+        assert result["value"] == "[aborted]"
+        bridge.clear_abort()
+
+    def test_normal_execution_unchanged(self):
+        bridge.clear_abort()
+        assert run_bash("echo hello") == "hello"

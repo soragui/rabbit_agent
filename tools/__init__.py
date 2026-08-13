@@ -2,20 +2,52 @@
 
 Also re-exports from the submodules so other code can ``from tools import ...``.
 """
+import contextlib
+import os as _os
+import signal as _signal
 import subprocess as _subprocess
+import time as _time
 
 from config import WORKDIR, safe_path
+from harness.ui_bridge import bridge
+
+
+def _kill_tree(proc: _subprocess.Popen) -> None:
+    """Kill the process group (shell + children), falling back to the process."""
+    try:
+        _os.killpg(_os.getpgid(proc.pid), _signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
 
 
 def run_bash(command: str, cwd: str = None) -> str:
     try:
-        r = _subprocess.run(
+        proc = _subprocess.Popen(
             command, shell=True, cwd=cwd or str(WORKDIR),
-            capture_output=True, text=True, timeout=300)
-        out = (r.stdout + r.stderr).strip()
-        return out[:50000] if out else "(no output)"
-    except _subprocess.TimeoutExpired:
-        return "Error: Timeout (300s)"
+            stdout=_subprocess.PIPE, stderr=_subprocess.PIPE, text=True,
+            start_new_session=True)
+    except Exception as e:
+        return f"Error: {e}"
+
+    deadline = _time.monotonic() + 300
+    while True:
+        if bridge.is_abort_requested():
+            _kill_tree(proc)
+            out, err = proc.communicate()
+            partial = (out + err).strip()[:2000]
+            return f"[aborted]\n{partial}" if partial else "[aborted]"
+        try:
+            out, err = proc.communicate(timeout=0.1)
+            break
+        except _subprocess.TimeoutExpired:
+            if _time.monotonic() > deadline:
+                _kill_tree(proc)
+                proc.communicate()
+                return "Error: Timeout (300s)"
+
+    combined = (out + err).strip()
+    return combined[:50000] if combined else "(no output)"
 
 
 def run_read(path: str, limit: int = None) -> str:
