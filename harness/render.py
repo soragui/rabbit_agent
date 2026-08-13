@@ -50,6 +50,13 @@ def render_activity(text: str, style: str = "") -> None:
         bridge.emit("activity", text, style=style)
 
 
+def render_blank() -> None:
+    """Print a blank line in plain mode — no-op in TUI mode."""
+    if _TUI_ACTIVE:
+        return
+    print()
+
+
 def render_banner(model: str, workdir: str) -> None:
     if _TUI_ACTIVE:
         bridge.emit("chat", f"51agent — {model}\nWorkdir: {workdir}", style="banner")

@@ -28,6 +28,7 @@ from harness.plan import get_plan_state
 from harness.render import (
     render_activity,
     render_banner,
+    render_blank,
     render_help,
     render_inbox,
     render_info,
@@ -275,7 +276,7 @@ def handle_input(query: str, history: list) -> bool:
         with spinner("Thinking..."):
             agent_loop_full(history, ctx, tools, handlers)
     except KeyboardInterrupt:
-        print()
+        render_blank()
         render_info("Interrupted. Type 'q' to quit.")
 
     for msg in history[-2:]:
@@ -289,6 +290,7 @@ def handle_input(query: str, history: list) -> bool:
                     break
 
     _agent_idle = True
+    render_blank()
     return True
 
 
