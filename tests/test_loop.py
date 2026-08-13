@@ -146,3 +146,32 @@ class TestStreamAbort:
         with pytest.raises(TurnAborted):
             _stream_llm([], [], RecoveryState(), "sys", 100)
         bridge.clear_abort()
+
+
+class TestToolResultHeuristic:
+    def test_aborted_output_rendered_as_failure(self, monkeypatch):
+        """[aborted] tool output must render as a failure, not a green check."""
+        import loop as loop_mod
+
+        render_calls: list[tuple[str, str, bool]] = []
+        stream_calls: list[int] = []
+
+        def fake_stream_llm(messages, tools, state, system, max_tokens):
+            stream_calls.append(1)
+            if len(stream_calls) == 1:
+                return types.SimpleNamespace(
+                    stop_reason="tool_use",
+                    content=[types.SimpleNamespace(
+                        type="tool_use", name="bash", id="toolu_1",
+                        input={"command": "x"})])
+            return types.SimpleNamespace(stop_reason="stop", content=[])
+
+        monkeypatch.setattr(loop_mod, "_stream_llm", fake_stream_llm)
+        monkeypatch.setattr(
+            loop_mod, "render_tool_result",
+            lambda name, output, ok: render_calls.append((name, output, ok)))
+
+        loop_mod.agent_loop_full(
+            [], {}, [], {"bash": lambda **kw: "[aborted]"})
+
+        assert render_calls == [("bash", "[aborted]", False)]

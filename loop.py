@@ -186,7 +186,9 @@ def agent_loop_full(messages: list, context: dict, tools: list[dict], handlers: 
             trigger_hooks("PostToolUse", block, output)
             results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(output)})
             ok = not (str(output).startswith("Error")
-                      or str(output).startswith("Permission denied"))
+                      or str(output).startswith("Permission denied")
+                      or str(output).startswith("[aborted]")
+                      or str(output).startswith("Unknown tool"))
             render_tool_result(block.name, str(output), ok=ok)
 
         # compose user message: bg notifications + tool results
