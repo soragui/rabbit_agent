@@ -1,6 +1,6 @@
 # 51agent
 
-A coding agent built from first principles in Python — from a bare `while` loop to a multi-agent system with 29 tools. Uses the Anthropic Messages API, works with Anthropic, DeepSeek, or any compatible endpoint.
+A coding agent built from first principles in Python — from a bare `while` loop to a multi-agent system with 29 tools. Uses the Anthropic Messages API, works with Anthropic, DeepSeek, or any compatible endpoint. On a real terminal it runs in a full-screen TUI; piped or non-TTY runs fall back to plain scrollback output.
 
 ## Install
 
@@ -35,7 +35,25 @@ cp .env.example .env   # edit with your API key
 uv run python agent.py
 ```
 
-Type `?` for help. `q` or Ctrl+C twice to exit.
+## The full-screen TUI
+
+On a terminal, `51agent` (or `uv run python agent.py`) starts a full-screen interface:
+
+- **Header** — model, agent state, plan-mode phase
+- **Chat pane** — your prompts and the assistant's streamed replies
+- **Activity pane** — tool calls with ✓/✗/⏳ markers, permission questions, background-task and cron notifications
+- **Status bar** — context usage, workdir, git branch + dirty count, python/node versions, queued cron jobs
+
+| Key | Action |
+|---|---|
+| `Enter` | submit (`Esc`+`Enter` inserts a newline) |
+| `Tab` | cycle focus between the input and the panes |
+| `PgUp` / `PgDn` | scroll a focused pane |
+| `Ctrl+C` mid-turn | abort the turn (kills running bash commands) |
+| `Ctrl+C` at the prompt | exit |
+| `q` | exit — saves the session; next start offers to resume |
+
+Permission prompts (`Allow bash? (y/N)`) appear in the activity pane and are answered through the input line. Piped or non-TTY runs (`echo "…" | 51agent`) keep the plain scrollback output unchanged.
 
 ## Progressive learning stages
 
@@ -61,7 +79,10 @@ The full agent (`agent.py`) imports from two packages:
 - **Compaction** — 4-level pipeline (budget → snip → micro → reactive), preserves tool-use pair integrity
 - **Recovery** — exponential backoff with jitter, automatic model fallback on repeated 529 errors
 - **Background** — auto-detects slow bash commands and dispatches to daemon threads
-- **Render** — Rich-based terminal UI with markdown rendering, syntax highlighting, spinners
+- **Render facade** — routes all output to TUI events in full-screen mode, Rich/print otherwise — every call site is mode-agnostic
+- **UI bridge** — thread-safe event queue, pending-question mechanism, and abort flag between the agent's worker threads and the UI
+- **TUI** — prompt_toolkit full-screen app: layout, key bindings, event consumer, status refresh
+- **Status** — status-bar collectors (git/python/node, token usage, cron count) with TTL caching
 - **Tool pool** — assembles the complete `(tools, handlers)` tuple including dynamically-prefixed MCP tools
 
 ### `tools/` — tool implementations
