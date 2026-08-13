@@ -104,3 +104,14 @@ def test_tui_streaming_renderer_emits_incremental():
     assert streams[0].payload == ""          # block opens empty
     assert streams[-1].payload == "Hello"    # accumulated text
     assert events[-1].kind == "clear_stream"
+
+
+def test_tui_streaming_renderer_clears_stream_on_consumer_exception():
+    """A consumer exception must still finalize the in-flight chat block."""
+    render.set_tui_active(True)
+    with pytest.raises(RuntimeError), render.streaming_renderer() as r:
+        r("partial reply")
+        raise RuntimeError("consumer blew up")
+    events = bridge.drain()
+    assert events[-1].kind == "clear_stream"
+    assert any(e.kind == "stream" and e.payload == "partial reply" for e in events)

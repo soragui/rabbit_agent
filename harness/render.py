@@ -205,8 +205,10 @@ def streaming_renderer():
         def _add(text: str) -> None:
             bridge.emit("stream", text, style="agent")
 
-        yield _add
-        bridge.emit("clear_stream")
+        try:
+            yield _add
+        finally:
+            bridge.emit("clear_stream")
         return
 
     if not _HAS_RICH:
