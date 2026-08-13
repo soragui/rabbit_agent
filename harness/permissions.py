@@ -10,7 +10,7 @@ Gate order: deny-list → never tier → workspace boundary → tier decision
 """
 from config import WORKDIR
 from harness import register_hook
-from harness.render import render_info, render_tool_use
+from harness.render import render_info, render_tool_use, tui_active
 
 # -- tier definitions ------------------------------------------------------
 SAFE = {
@@ -60,10 +60,14 @@ def _get_tier(tool_name: str) -> str:
 
 def _prompt_user(tool_name: str, detail: str = "") -> bool:
     """Ask the user to approve a tool. Returns True if approved."""
-    msg = f"  Allow {tool_name}?"
+    msg = f"Allow {tool_name}?"
     if detail:
         msg += f" [{detail[:80]}]"
-    msg += " (y/N): "
+    msg += " (y/N)"
+    if tui_active():
+        from harness.ui_bridge import bridge
+
+        return bridge.ask_question(msg, default=False, timeout=300)
     try:
         decision = input(msg).strip().lower()
     except (EOFError, KeyboardInterrupt):

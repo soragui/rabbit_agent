@@ -140,3 +140,41 @@ class TestPermissionHook:
             assert "bash" in _approved_once
 
         _approved_once.clear()
+
+
+import threading
+import time as _time
+
+from harness import render
+from harness.permissions import _prompt_user
+from harness.ui_bridge import bridge
+
+
+class TestPromptUserTui:
+    def test_tui_prompt_answered_yes(self, monkeypatch):
+        monkeypatch.setattr(render, "_TUI_ACTIVE", True)
+
+        def ui():
+            while not bridge.has_pending_question():
+                _time.sleep(0.01)
+            bridge.answer_question("y")
+
+        t = threading.Thread(target=ui)
+        t.start()
+        assert _prompt_user("bash") is True
+        t.join()
+        bridge.drain()
+
+    def test_tui_prompt_empty_denies(self, monkeypatch):
+        monkeypatch.setattr(render, "_TUI_ACTIVE", True)
+
+        def ui():
+            while not bridge.has_pending_question():
+                _time.sleep(0.01)
+            bridge.answer_question("")
+
+        t = threading.Thread(target=ui)
+        t.start()
+        assert _prompt_user("bash") is False
+        t.join()
+        bridge.drain()
