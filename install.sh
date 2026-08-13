@@ -77,8 +77,10 @@ _download_release() {
 
 # -- determine source ------------------------------------------------------
 if [ -z "$SOURCE_DIR" ]; then
-    # Auto-detect: if install.sh is run from within the repo, use that dir
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    # Auto-detect: if install.sh is run from within the repo, use that dir.
+    # BASH_SOURCE[0] is unset when piped (curl | bash) — the :- default makes
+    # it fall back to the cwd, then the check below downloads from GitHub.
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" && pwd)"
     if [ -f "$SCRIPT_DIR/agent.py" ] && [ -f "$SCRIPT_DIR/config.py" ]; then
         SOURCE_DIR="$SCRIPT_DIR"
     else
@@ -110,10 +112,12 @@ echo "→ Installing agent files to $AGENT_HOME ..."
 mkdir -p "$AGENT_HOME"
 
 # Core modules
-FILES=(agent.py config.py loop.py VERSION)
-for f in "${FILES[@]}"; do
+for f in agent.py config.py loop.py; do
     cp "$SOURCE_DIR/$f" "$AGENT_HOME/"
 done
+
+# VERSION is metadata only — older release tarballs may not include it
+[ -f "$SOURCE_DIR/VERSION" ] && cp "$SOURCE_DIR/VERSION" "$AGENT_HOME/"
 
 # Packages
 for pkg in harness tools; do
