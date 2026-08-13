@@ -303,13 +303,16 @@ def run_tui(history: list, on_line) -> None:
     latest = find_latest_session()
 
     def _startup_worker():
-        if latest and bridge.ask_question(
-                f"Resume session from {_time.ctime(latest.stat().st_mtime)}? (y/N)"):
-            loaded = load_session(latest)
-            if loaded:
-                history[:] = loaded
-                bridge.emit("chat", f"Resumed session with {len(history)} messages.",
-                            style="info")
+        try:
+            if latest and bridge.ask_question(
+                    f"Resume session from {_time.ctime(latest.stat().st_mtime)}? (y/N)"):
+                loaded = load_session(latest)
+                if loaded:
+                    history[:] = loaded
+                    bridge.emit("chat", f"Resumed session with {len(history)} messages.",
+                                style="info")
+        except Exception as e:
+            bridge.emit("chat", f"✗ resume failed: {e}", style="error")
 
     if latest:
         threading.Thread(target=_startup_worker, daemon=True, name="resume").start()
