@@ -1,12 +1,17 @@
 """Tests for 4-tier permission system."""
+import threading
+import time as _time
 from unittest.mock import MagicMock, patch
 
+from harness import render
 from harness.permissions import (
     DENY_LIST,
     NEVER,
     _approved_once,
     _get_tier,
+    _prompt_user,
 )
+from harness.ui_bridge import bridge
 
 
 class TestTierClassification:
@@ -140,14 +145,6 @@ class TestPermissionHook:
             assert "bash" in _approved_once
 
         _approved_once.clear()
-
-
-import threading
-import time as _time
-
-from harness import render
-from harness.permissions import _prompt_user
-from harness.ui_bridge import bridge
 
 
 class TestPromptUserTui:
