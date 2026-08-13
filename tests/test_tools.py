@@ -139,3 +139,36 @@ class TestBashAbort:
     def test_normal_execution_unchanged(self):
         bridge.clear_abort()
         assert run_bash("echo hello") == "hello"
+
+
+class TestBashKeyboardInterrupt:
+    def test_keyboard_interrupt_kills_process_group(self, monkeypatch):
+        """Plain-mode SIGINT must kill the process group, then re-raise."""
+        import signal as _signal
+
+        import tools as tools_mod
+
+        killed_groups: list[tuple[int, int]] = []
+
+        class FakeProc:
+            pid = 4242
+            kill_group_called = False
+
+            def communicate(self, timeout=None):
+                raise KeyboardInterrupt()
+
+        monkeypatch.setattr(
+            tools_mod._subprocess, "Popen",
+            lambda *args, **kw: FakeProc())
+        monkeypatch.setattr(tools_mod._os, "getpgid", lambda pid: 4242)
+
+        def fake_killpg(pgid, sig):
+            killed_groups.append((pgid, sig))
+            FakeProc.kill_group_called = True
+
+        monkeypatch.setattr(tools_mod._os, "killpg", fake_killpg)
+
+        with pytest.raises(KeyboardInterrupt):
+            run_bash("x")
+        assert killed_groups == [(4242, _signal.SIGKILL)]
+        assert FakeProc.kill_group_called

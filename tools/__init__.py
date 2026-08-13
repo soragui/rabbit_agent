@@ -31,20 +31,24 @@ def run_bash(command: str, cwd: str = None) -> str:
         return f"Error: {e}"
 
     deadline = _time.monotonic() + 300
-    while True:
-        if bridge.is_abort_requested():
-            _kill_tree(proc)
-            out, err = proc.communicate()
-            partial = (out + err).strip()[:2000]
-            return f"[aborted]\n{partial}" if partial else "[aborted]"
-        try:
-            out, err = proc.communicate(timeout=0.1)
-            break
-        except _subprocess.TimeoutExpired:
-            if _time.monotonic() > deadline:
+    try:
+        while True:
+            if bridge.is_abort_requested():
                 _kill_tree(proc)
-                proc.communicate()
-                return "Error: Timeout (300s)"
+                out, err = proc.communicate()
+                partial = (out + err).strip()[:2000]
+                return f"[aborted]\n{partial}" if partial else "[aborted]"
+            try:
+                out, err = proc.communicate(timeout=0.1)
+                break
+            except _subprocess.TimeoutExpired:
+                if _time.monotonic() > deadline:
+                    _kill_tree(proc)
+                    proc.communicate()
+                    return "Error: Timeout (300s)"
+    except KeyboardInterrupt:
+        _kill_tree(proc)
+        raise
 
     combined = (out + err).strip()
     return combined[:50000] if combined else "(no output)"
