@@ -11,7 +11,13 @@ Threading model (completed in Task 8): agent turns run in a worker
 thread; render events arrive on the bridge queue and are consumed by
 an asyncio background task inside the application loop.
 """
+import asyncio
+import sys
+import threading
+import time as _time
+
 from prompt_toolkit import Application
+from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import PathCompleter, WordCompleter, merge_completers
 from prompt_toolkit.document import Document
@@ -22,7 +28,9 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.styles import Style
 
 from config import MODEL, WORKDIR
+from harness import render as _render
 from harness.plan import get_plan_state
+from harness.session import find_latest_session, load_session
 from harness.status import collect_status
 from harness.ui_bridge import Event, bridge
 
@@ -180,7 +188,6 @@ def _make_input_buffer() -> Buffer:
     def _accept(b: Buffer) -> bool:
         line = b.text
         b.reset()
-        from harness.tui import _route_line  # defined in Task 8
         _route_line(line)
         return True
 
@@ -222,6 +229,98 @@ def _ctrl_c(event):
 @_kb.add("tab")
 def _focus_next(event):
     event.app.layout.focus_next()
+
+
+# -- input routing ----------------------------------------------------------
+_history: list = []
+_on_line = None
+_app: Application | None = None
+
+
+def _route_line(line: str) -> None:
+    """Footer accept handler — answer a pending question, or start a turn."""
+    global _turn_running
+    if bridge.has_pending_question():
+        bridge.answer_question(line)
+        return
+    if _turn_running:
+        bridge.emit("chat", "⏳ agent busy — wait for the current turn to finish",
+                    style="info")
+        return
+
+    _turn_running = True
+    bridge.clear_abort()
+    bridge.emit("chat", line, style="user")
+
+    def worker():
+        global _turn_running
+        try:
+            ok = _on_line(line, _history)
+            if not ok:
+                _app.call_from_executor(_app.exit)
+        except Exception as e:
+            bridge.emit("chat", f"✗ turn crashed: {e}", style="error")
+        finally:
+            _turn_running = False
+            bridge.clear_abort()
+
+    threading.Thread(target=worker, daemon=True, name="turn").start()
+
+
+# -- application background tasks -------------------------------------------
+async def _event_consumer() -> None:
+    while True:
+        events = bridge.drain()
+        if events:
+            apply_events(events, _chat_buffer, _activity_buffer)
+            get_app().invalidate()
+        await asyncio.sleep(0.05)
+
+
+async def _status_loop() -> None:
+    """Re-render once a second so header/status pick up new state."""
+    while True:
+        get_app().invalidate()
+        await asyncio.sleep(1.0)
+
+
+# -- startup ----------------------------------------------------------------
+def run_tui(history: list, on_line) -> None:
+    """Start the full-screen app. Caller guarantees stdin/stdout are TTYs."""
+    global _app, _history, _on_line
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        raise RuntimeError("TUI requires a terminal (stdin and stdout must be TTYs)")
+
+    _render.set_tui_active(True)
+    _history = history
+    _on_line = on_line
+    _app = _build_app()
+
+    # startup content — queued before the consumer starts; order preserved
+    bridge.emit("chat", f"51agent — {MODEL}\nWorkdir: {WORKDIR}", style="banner")
+    bridge.emit("chat", _HELP_TEXT, style="help")
+
+    latest = find_latest_session()
+
+    def _startup_worker():
+        if latest and bridge.ask_question(
+                f"Resume session from {_time.ctime(latest.stat().st_mtime)}? (y/N)"):
+            loaded = load_session(latest)
+            if loaded:
+                history[:] = loaded
+                bridge.emit("chat", f"Resumed session with {len(history)} messages.",
+                            style="info")
+
+    if latest:
+        threading.Thread(target=_startup_worker, daemon=True, name="resume").start()
+
+    _app.create_background_task(_event_consumer())
+    _app.create_background_task(_status_loop())
+
+    try:
+        _app.run()
+    finally:
+        _render.set_tui_active(False)
 
 
 # -- application ------------------------------------------------------------

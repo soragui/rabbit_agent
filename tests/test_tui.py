@@ -1,4 +1,5 @@
 """TUI unit tests — headless; no terminal, no Application.run()."""
+import pytest
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.document import Document
 
@@ -80,3 +81,9 @@ def test_build_app_returns_full_screen_app():
     app = tui._build_app()
     assert app.full_screen is True
     assert app.layout is not None
+
+
+def test_run_tui_requires_tty(monkeypatch):
+    monkeypatch.setattr(tui.sys, "stdin", tui.sys.stdout)
+    with pytest.raises(RuntimeError):
+        tui.run_tui([], on_line=lambda q, h: True)
