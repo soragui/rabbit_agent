@@ -100,3 +100,15 @@ def test_run_tui_requires_tty(monkeypatch):
     monkeypatch.setattr(tui.sys, "stdin", tui.sys.stdout)
     with pytest.raises(RuntimeError):
         tui.run_tui([], on_line=lambda q, h: True)
+
+
+def test_safe_file_history_swallows_store_failures():
+    """Append-time OSError (unwritable history file) must not kill the app."""
+    h = tui._SafeFileHistory("/nonexistent-dir-xyz/.agent_history")
+    h.store_string("q")  # must not raise
+
+
+def test_make_input_buffer_returns_buffer_with_history():
+    buf = tui._make_input_buffer()
+    assert isinstance(buf, Buffer)
+    assert isinstance(buf.history, tui._SafeFileHistory)

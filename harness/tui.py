@@ -22,7 +22,7 @@ from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import PathCompleter, WordCompleter, merge_completers
 from prompt_toolkit.document import Document
-from prompt_toolkit.history import FileHistory, InMemoryHistory
+from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import HSplit, Layout, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
@@ -184,15 +184,20 @@ def _status_text() -> list[tuple[str, str]]:
 
 
 # -- input buffer -----------------------------------------------------------
+class _SafeFileHistory(FileHistory):
+    """FileHistory that swallows store failures (unwritable .agent_history)."""
+
+    def store_string(self, string: str) -> None:
+        with contextlib.suppress(OSError):
+            super().store_string(string)
+
+
 def _make_input_buffer() -> Buffer:
     completer = merge_completers([
         WordCompleter(AGENT_COMMANDS + AGENT_TOOLS, ignore_case=True, sentence=True),
         PathCompleter(expanduser=True),
     ])
-    try:
-        history = FileHistory(str(WORKDIR / ".agent_history"))
-    except Exception:
-        history = InMemoryHistory()
+    history = _SafeFileHistory(str(WORKDIR / ".agent_history"))
     buf = Buffer(multiline=True, completer=completer, history=history)
 
     def _accept(b: Buffer) -> bool:
