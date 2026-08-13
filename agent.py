@@ -10,6 +10,7 @@ Config:
     Installed: ~/.51agent/settings.json
     Dev mode:  .env in the current directory
 """
+import atexit
 import sys
 import threading
 import time
@@ -25,20 +26,22 @@ from harness.memory import inject_memories
 from harness.permissions import install as install_permissions
 from harness.plan import get_plan_state
 from harness.render import (
+    render_activity,
     render_banner,
     render_help,
     render_inbox,
     render_info,
-    render_markdown,
     spinner,
 )
 from harness.session import find_latest_session, load_session, save_session
 from harness.tool_pool import assemble_tool_pool
+from harness.tui import AGENT_COMMANDS, AGENT_TOOLS
+from loop import agent_loop_full
 from tools import cron as _cron
 from tools import mcp as _mcp
 from tools import teams as _teams
 
-# -- prompt_toolkit input --------------------------------------------------
+# -- prompt_toolkit input (plain mode only) ---------------------------------
 try:
     from prompt_toolkit import PromptSession
     from prompt_toolkit.completion import PathCompleter, WordCompleter, merge_completers
@@ -48,18 +51,6 @@ try:
     _HAS_PROMPT_TOOLKIT = True
 except ImportError:
     _HAS_PROMPT_TOOLKIT = False
-
-_AGENT_COMMANDS = ["q", "exit", "quit", "?"]
-_AGENT_TOOLS = [
-    "bash", "read_file", "write_file", "edit_file", "glob",
-    "todo_write", "structured_output", "task", "load_skill", "compact",
-    "create_task", "list_tasks", "get_task", "claim_task", "complete_task",
-    "schedule_cron", "list_crons", "cancel_cron",
-    "spawn_teammate", "send_message", "check_inbox",
-    "request_shutdown", "request_plan", "review_plan",
-    "create_worktree", "remove_worktree", "keep_worktree",
-    "connect_mcp",
-]
 
 _PROMPT_STYLE = Style.from_dict({
     "prompt": "cyan bold",
@@ -89,7 +80,7 @@ def _create_prompt_session() -> PromptSession | None:
         event.current_buffer.insert_text("\n")
 
     completer = merge_completers([
-        WordCompleter(_AGENT_COMMANDS + _AGENT_TOOLS, ignore_case=True, sentence=True),
+        WordCompleter(AGENT_COMMANDS + AGENT_TOOLS, ignore_case=True, sentence=True),
         PathCompleter(expanduser=True),
     ])
     history = FileHistory(str(_history_file)) if _history_file else None
@@ -124,16 +115,6 @@ def _build_context(allowed: set[str] | None = None) -> tuple[dict, list[dict], d
     return ctx, tools, handlers
 
 
-def _render_last_response(history: list) -> None:
-    """Render text blocks from the last assistant message, if any."""
-    if not history:
-        return
-    last = history[-1].get("content", "") if isinstance(history[-1], dict) else ""
-    if isinstance(last, list):
-        for block in last:
-            if getattr(block, "type", None) == "text":
-                render_markdown(block.text)
-
 # -- cron queue processor --------------------------------------------------
 _agent_idle = True
 agent_lock = threading.Lock()
@@ -147,6 +128,7 @@ def _deliver_cron_tasks():
         return
     context, tools, handlers = _build_context()
     for job in fired:
+        render_activity(f"[cron] {job.prompt[:60]}", style="cron")
         _history_ref.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
     agent_loop_full(_history_ref, context, tools, handlers)
 
@@ -169,24 +151,160 @@ def queue_processor_loop():
             agent_lock.release()
 
 
-# -- main ------------------------------------------------------------------
-if __name__ == "__main__":
-    from loop import agent_loop_full
+# -- one line of user input ------------------------------------------------
+def handle_input(query: str, history: list) -> bool:
+    """Process one user line. Returns False when the session should exit.
 
+    Called from the plain-mode loop (same thread) and from the TUI's
+    worker thread. No terminal I/O here — all output via harness.render.
+    """
+    if query.strip().lower() in ("q", "exit", "quit"):
+        save_session(history)
+        return False
+    if query.strip().lower() == "?":
+        render_help()
+        return True
+
+    if not query.strip():
+        inbox = _teams.consume_lead_inbox()
+        if inbox:
+            render_inbox(inbox)
+            inbox_text = "\n".join(
+                f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
+                for m in inbox)
+            history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
+            _agent_idle = False
+            ctx, tools, handlers = _build_context()
+            agent_loop_full(history, ctx, tools, handlers)
+            _agent_idle = True
+        return True
+
+    _agent_idle = False
+    trigger_hooks("UserPromptSubmit", query)
+
+    for job in _cron.consume_queue():
+        render_activity(f"[cron] {job.prompt[:60]}", style="cron")
+        history.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
+
+    inbox = _teams.consume_lead_inbox()
+    if inbox:
+        render_inbox(inbox)
+        inbox_text = "\n".join(
+            f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
+            for m in inbox)
+        history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
+
+    plan = get_plan_state()
+
+    # -- plan-mode: handle approval / revision ---------------------------
+    if plan.phase == "awaiting_approval":
+        decision = query.strip().lower()
+        if decision in ("y", "yes", ""):
+            plan.approve()
+            render_info("Plan approved. Executing...")
+            # Inject plan context and execute with full tools
+            history.append({"role": "user", "content": plan.plan_context})
+            ctx, tools, handlers = _build_context()
+            _agent_idle = False
+            with spinner("Executing plan..."):
+                agent_loop_full(history, ctx, tools, handlers)
+            _agent_idle = True
+            plan.reset()
+            return True
+        if decision.startswith("r:") or decision.startswith("r "):
+            feedback = decision[2:].strip() or "Revise the plan."
+            render_info(f"Revising: {feedback}")
+            allowed = plan.revise(feedback)
+            history.append({"role": "user", "content": f"Revise the plan: {feedback}"})
+            ctx, tools, handlers = _build_context(allowed=set(allowed))
+            _agent_idle = False
+            with spinner("Revising plan..."):
+                agent_loop_full(history, ctx, tools, handlers)
+            _agent_idle = True
+            # Check if agent produced a new plan
+            if plan.phase == "planning":
+                # Extract plan from last response
+                last = history[-1].get("content", []) if history else []
+                if isinstance(last, list):
+                    for block in last:
+                        if getattr(block, "type", None) == "text":
+                            plan.submit_plan(block.text)
+            if plan.phase == "awaiting_approval":
+                render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+            return True
+        if decision in ("n", "no"):
+            plan.reject()
+            render_info("Plan rejected.")
+            return True
+        # Any other input during approval: treat as feedback
+        render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+        return True
+
+    # -- plan-mode: start planning ---------------------------------------
+    if query.strip().lower().startswith("/plan "):
+        task = query.strip()[6:]
+        plan.start_planning(task)
+        allowed = list(plan.READONLY_TOOLS)
+        history.append({"role": "user",
+            "content": f"Create a plan for: {task}. Use read-only tools to explore the codebase, then output your plan as a text response. Do NOT make any changes — just propose the approach."})
+        ctx, tools, handlers = _build_context(allowed=set(allowed))
+        _agent_idle = False
+        with spinner("Planning..."):
+            agent_loop_full(history, ctx, tools, handlers)
+        _agent_idle = True
+        # Extract plan text from response
+        last = history[-1].get("content", []) if history else []
+        if isinstance(last, list):
+            for block in last:
+                if getattr(block, "type", None) == "text":
+                    plan.submit_plan(block.text)
+        if plan.phase == "awaiting_approval":
+            render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
+        return True
+
+    # -- normal execution ------------------------------------------------
+    history.append({"role": "user", "content": query})
+
+    # If we're in executing phase, inject plan context
+    if plan.phase == "executing":
+        pass  # plan already injected on approval
+
+    ctx, tools, handlers = _build_context()
+
+    try:
+        with spinner("Thinking..."):
+            agent_loop_full(history, ctx, tools, handlers)
+    except KeyboardInterrupt:
+        print()
+        render_info("Interrupted. Type 'q' to quit.")
+
+    for msg in history[-2:]:
+        content = msg.get("content", [])
+        if isinstance(content, list):
+            for block in content:
+                if hasattr(block, "name") and block.name == "connect_mcp":
+                    tools, handlers = assemble_tool_pool()
+                    ctx["enabled_tools"] = [t["name"] for t in tools]
+                    ctx["mcp_servers"] = ", ".join(_mcp.mcp_clients.keys())
+                    break
+
+    _agent_idle = True
+    return True
+
+
+# -- plain (non-TTY) mode --------------------------------------------------
+def _run_plain_loop(history: list) -> None:
+    """The pre-TUI scrollback experience, unchanged."""
     render_banner(MODEL, str(WORKDIR))
     render_help()
-
-    import atexit
-
-    history: list = []
-    _history_ref = history
-    atexit.register(lambda: save_session(history))
 
     # Offer to resume last session
     latest = find_latest_session()
     if latest:
         try:
-            choice = input(f"\n  Resume session from {time.ctime(latest.stat().st_mtime)}? (y/N): ").strip().lower()
+            choice = input(
+                f"\n  Resume session from {time.ctime(latest.stat().st_mtime)}? (y/N): "
+            ).strip().lower()
         except (EOFError, KeyboardInterrupt):
             choice = "n"
         if choice in ("y", "yes"):
@@ -194,9 +312,6 @@ if __name__ == "__main__":
             if loaded:
                 history[:] = loaded
                 render_info(f"Resumed session with {len(history)} messages.")
-
-    threading.Thread(target=_cron.scheduler_loop, daemon=True, name="cron").start()
-    threading.Thread(target=queue_processor_loop, daemon=True, name="cron-queue").start()
 
     while True:
         try:
@@ -212,133 +327,22 @@ if __name__ == "__main__":
             print("\nBye.")
             break
 
-        if query.strip().lower() in ("q", "exit", "quit"):
-            save_session(history)
+        if not handle_input(query, history):
             break
-        if query.strip().lower() == "?":
-            render_help()
-            continue
 
-        if not query.strip():
-            inbox = _teams.consume_lead_inbox()
-            if inbox:
-                render_inbox(inbox)
-                inbox_text = "\n".join(
-                    f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
-                    for m in inbox)
-                history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
-                _agent_idle = False
-                ctx, tools, handlers = _build_context()
-                agent_loop_full(history, ctx, tools, handlers)
-                _agent_idle = True
-            continue
 
-        _agent_idle = False
-        trigger_hooks("UserPromptSubmit", query)
+# -- main ------------------------------------------------------------------
+if __name__ == "__main__":
+    history: list = []
+    _history_ref = history
+    atexit.register(lambda: save_session(history))
 
-        for job in _cron.consume_queue():
-            history.append({"role": "user", "content": f"[Scheduled] {job.prompt}"})
+    threading.Thread(target=_cron.scheduler_loop, daemon=True, name="cron").start()
+    threading.Thread(target=queue_processor_loop, daemon=True, name="cron-queue").start()
 
-        inbox = _teams.consume_lead_inbox()
-        if inbox:
-            render_inbox(inbox)
-            inbox_text = "\n".join(
-                f"From {m['from']} ({m.get('type', 'message')}): {m['content'][:300]}"
-                for m in inbox)
-            history.append({"role": "user", "content": f"[Inbox]\n{inbox_text}"})
+    if sys.stdin.isatty() and sys.stdout.isatty():
+        from harness.tui import run_tui
 
-        plan = get_plan_state()
-
-        # -- plan-mode: handle approval / revision ---------------------------
-        if plan.phase == "awaiting_approval":
-            decision = query.strip().lower()
-            if decision in ("y", "yes", ""):
-                plan.approve()
-                render_info("Plan approved. Executing...")
-                # Inject plan context and execute with full tools
-                history.append({"role": "user", "content": plan.plan_context})
-                ctx, tools, handlers = _build_context()
-                _agent_idle = False
-                with spinner("Executing plan..."):
-                    agent_loop_full(history, ctx, tools, handlers)
-                _agent_idle = True
-                plan.reset()
-                continue
-            if decision.startswith("r:") or decision.startswith("r "):
-                feedback = decision[2:].strip() or "Revise the plan."
-                render_info(f"Revising: {feedback}")
-                allowed = plan.revise(feedback)
-                history.append({"role": "user", "content": f"Revise the plan: {feedback}"})
-                ctx, tools, handlers = _build_context(allowed=set(allowed))
-                _agent_idle = False
-                with spinner("Revising plan..."):
-                    agent_loop_full(history, ctx, tools, handlers)
-                _agent_idle = True
-                # Check if agent produced a new plan
-                if plan.phase == "planning":
-                    # Extract plan from last response
-                    last = history[-1].get("content", []) if history else []
-                    if isinstance(last, list):
-                        for block in last:
-                            if getattr(block, "type", None) == "text":
-                                plan.submit_plan(block.text)
-                if plan.phase == "awaiting_approval":
-                    render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
-                continue
-            if decision in ("n", "no"):
-                plan.reject()
-                render_info("Plan rejected.")
-                continue
-            # Any other input during approval: treat as feedback
-            render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
-
-        # -- plan-mode: start planning ---------------------------------------
-        if query.strip().lower().startswith("/plan "):
-            task = query.strip()[6:]
-            plan.start_planning(task)
-            allowed = list(plan.READONLY_TOOLS)
-            history.append({"role": "user",
-                "content": f"Create a plan for: {task}. Use read-only tools to explore the codebase, then output your plan as a text response. Do NOT make any changes — just propose the approach."})
-            ctx, tools, handlers = _build_context(allowed=set(allowed))
-            _agent_idle = False
-            with spinner("Planning..."):
-                agent_loop_full(history, ctx, tools, handlers)
-            _agent_idle = True
-            # Extract plan text from response
-            last = history[-1].get("content", []) if history else []
-            if isinstance(last, list):
-                for block in last:
-                    if getattr(block, "type", None) == "text":
-                        plan.submit_plan(block.text)
-            if plan.phase == "awaiting_approval":
-                render_info("Approve? (y/Enter = yes, n = no, r: feedback)")
-            continue
-
-        # -- normal execution ------------------------------------------------
-        history.append({"role": "user", "content": query})
-
-        # If we're in executing phase, inject plan context
-        if plan.phase == "executing":
-            pass  # plan already injected on approval
-
-        ctx, tools, handlers = _build_context()
-
-        try:
-            with spinner("Thinking..."):
-                agent_loop_full(history, ctx, tools, handlers)
-        except KeyboardInterrupt:
-            print()
-            render_info("Interrupted. Type 'q' to quit.")
-
-        for msg in history[-2:]:
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                for block in content:
-                    if hasattr(block, "name") and block.name == "connect_mcp":
-                        tools, handlers = assemble_tool_pool()
-                        ctx["enabled_tools"] = [t["name"] for t in tools]
-                        ctx["mcp_servers"] = ", ".join(_mcp.mcp_clients.keys())
-                        break
-
-        _agent_idle = True
-        print()
+        run_tui(history, on_line=handle_input)
+    else:
+        _run_plain_loop(history)
