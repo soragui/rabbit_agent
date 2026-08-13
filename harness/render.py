@@ -2,6 +2,8 @@
 import sys
 from contextlib import contextmanager
 
+from harness.ui_bridge import bridge
+
 try:
     from rich import box
     from rich.console import Console as _RichConsole
@@ -18,8 +20,40 @@ except ImportError:
 
 _console = _RichConsole(highlight=True) if _HAS_RICH else None
 
+_TUI_ACTIVE = False
+
+
+def set_tui_active(active: bool) -> None:
+    """Switch rendering between TUI events (True) and Rich/print (False)."""
+    global _TUI_ACTIVE
+    _TUI_ACTIVE = active
+
+
+def tui_active() -> bool:
+    return _TUI_ACTIVE
+
+
+def render_tool_result(tool_name: str, output: str, ok: bool = True) -> None:
+    """Activity-pane result marker. Plain mode stays silent (results go to the model)."""
+    if not _TUI_ACTIVE:
+        return
+    if ok:
+        bridge.emit("activity", f"✓ {tool_name}", style="ok")
+    else:
+        detail = " ".join(str(output)[:120].splitlines())
+        bridge.emit("activity", f"✗ {tool_name} — {detail}", style="fail")
+
+
+def render_activity(text: str, style: str = "") -> None:
+    """Append a line to the activity pane (TUI) — no-op in plain mode."""
+    if _TUI_ACTIVE:
+        bridge.emit("activity", text, style=style)
+
 
 def render_banner(model: str, workdir: str) -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("chat", f"51agent — {model}\nWorkdir: {workdir}", style="banner")
+        return
     if _HAS_RICH:
         _console.print(Rule("51agent", style="cyan"))
         _console.print(f"[bold cyan]  Model:[/] {model}  [dim]|[/]  [bold cyan]Workdir:[/] {workdir}")
@@ -34,6 +68,14 @@ def render_banner(model: str, workdir: str) -> None:
 
 
 def render_help() -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("chat", r"""
+      (\_/)
+      ( -.-)
+      o_(")(")
+       ╰─ 51agent
+""", style="help")
+        return
     if _HAS_RICH:
         out = Text()
         out.append("\n")
@@ -55,6 +97,9 @@ def render_help() -> None:
 
 
 def render_markdown(content: str) -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("chat", content, style="agent")
+        return
     if _HAS_RICH:
         md = Markdown(content, code_theme="monokai")
         _console.print(md)
@@ -63,6 +108,10 @@ def render_markdown(content: str) -> None:
 
 
 def render_tool_use(tool_name: str, tool_input: str) -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("activity", f"{tool_name}: {tool_input[:160]}", style="tool")
+        bridge.emit("state", f"running {tool_name}")
+        return
     if _HAS_RICH:
         label = Text(tool_name, style="bold yellow")
         detail = Text(tool_input, style="dim")
@@ -72,6 +121,9 @@ def render_tool_use(tool_name: str, tool_input: str) -> None:
 
 
 def render_error(message: str) -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("chat", message, style="error")
+        return
     if _HAS_RICH:
         _console.print(f"[bold red]✗[/] {message}")
     else:
@@ -79,6 +131,9 @@ def render_error(message: str) -> None:
 
 
 def render_info(message: str) -> None:
+    if _TUI_ACTIVE:
+        bridge.emit("chat", message, style="info")
+        return
     if _HAS_RICH:
         _console.print(f"[dim]  {message}[/]")
     else:
@@ -86,6 +141,10 @@ def render_info(message: str) -> None:
 
 
 def render_inbox(messages: list[dict]) -> None:
+    if _TUI_ACTIVE:
+        lines = [f"  [inbox] {m.get('from', '?')} ({m.get('type', 'message')}): {str(m.get('content', ''))[:200]}" for m in messages]
+        bridge.emit("activity", "\n".join(lines), style="inbox")
+        return
     if _HAS_RICH:
         table = Table(box=box.SIMPLE, border_style="magenta", show_header=True, padding=(0, 1))
         table.add_column("From", style="bold magenta")
@@ -101,6 +160,13 @@ def render_inbox(messages: list[dict]) -> None:
 
 @contextmanager
 def spinner(label: str = "Thinking..."):
+    if _TUI_ACTIVE:
+        bridge.emit("state", label)
+        try:
+            yield
+        finally:
+            bridge.emit("state", "idle")
+        return
     if _HAS_RICH:
         try:
             with _console.status(f"[cyan]{label}[/]", spinner="dots"):
@@ -126,6 +192,16 @@ def streaming_renderer():
             for chunk in stream:
                 render(accumulated_text)
     """
+    if _TUI_ACTIVE:
+        bridge.emit("stream", "", style="agent")
+
+        def _add(text: str) -> None:
+            bridge.emit("stream", text, style="agent")
+
+        yield _add
+        bridge.emit("clear_stream")
+        return
+
     if not _HAS_RICH:
         chunks: list[str] = []
         def _add(text: str) -> None:
